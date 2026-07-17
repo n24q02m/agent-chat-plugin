@@ -1,0 +1,31 @@
+[build-system]
+requires = ["setuptools>=68"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "agent-chat-plugin"
+description = "Peer AI agents coordinate through markdown messages in shared channel folders — no orchestrator, autonomous zero-token waiting, cross-platform."
+readme = "README.md"
+requires-python = ">=3.8"
+license = { text = "MIT" }
+authors = [{ name = "n24q02m" }]
+keywords = ["multi-agent", "coordination", "markdown", "blackboard", "claude-code", "agent-skills", "peer-to-peer"]
+version = "0.0.0"  # managed by python-semantic-release; do not hand-edit
+classifiers = [
+  "Programming Language :: Python :: 3",
+  "License :: OSI Approved :: MIT License",
+  "Operating System :: OS Independent",
+  "Topic :: Software Development :: Libraries",
+]
+
+[project.urls]
+Homepage = "https://github.com/n24q02m/agent-chat-plugin"
+Specification = "https://github.com/n24q02m/agent-chat-plugin/blob/main/SPEC.md"
+
+# The CLI is a single stdlib module (chat.py). No runtime dependencies.
+# Distribution name is agent-chat-plugin; the installed command stays `agent-chat`.
+[project.scripts]
+agent-chat = "chat:main"
+
+[tool.setuptools]
+py-modules = ["chat"]

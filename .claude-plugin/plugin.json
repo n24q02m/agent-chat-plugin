@@ -1,0 +1,10 @@
+{
+  "name": "agent-chat-plugin",
+  "description": "Peer AI agents coordinate through markdown messages in shared channel folders — group chat / blackboard, no orchestrator, autonomous zero-token waiting, cross-platform.",
+  "version": "0.0.0",
+  "author": {
+    "name": "n24q02m",
+    "url": "https://github.com/n24q02m"
+  },
+  "homepage": "https://github.com/n24q02m/agent-chat-plugin"
+}
