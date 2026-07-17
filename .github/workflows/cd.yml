@@ -68,3 +68,31 @@ jobs:
       - run: uv build
       - name: Publish to PyPI (Trusted Publishing / OIDC)
         run: uv publish --trusted-publishing always
+
+  sync-marketplace:
+    name: Sync to Marketplace
+    # Stable only: claude-plugins mirrors this repo's marketplace listing
+    # (plugin.json/skills/hooks/commands/chat.py), same as the other 8 MCP
+    # plugins -- betas are not published there. release_type is checked
+    # directly (not is_prerelease) since this repo's release job outputs
+    # only released/tag.
+    needs: [release, publish-pypi]
+    if: needs.release.outputs.released == 'true' && inputs.release_type == 'stable'
+    runs-on: ubuntu-latest
+    steps:
+      - name: Generate GitHub App Token
+        id: app-token
+        uses: actions/create-github-app-token@bcd2ba49218906704ab6c1aa796996da409d3eb1 # v3
+        with:
+          app-id: ${{ vars.CI_APP_ID }}
+          private-key: ${{ secrets.CI_APP_KEY }}
+          repositories: claude-plugins
+
+      - name: Dispatch plugin sync
+        env:
+          GH_TOKEN: ${{ steps.app-token.outputs.token }}
+        run: |
+          gh api repos/n24q02m/claude-plugins/dispatches \
+            -f event_type=plugin-sync \
+            -f 'client_payload[repo]=agent-chat-plugin' \
+            -f 'client_payload[tag]=${{ needs.release.outputs.tag }}'
