@@ -1,5 +1,11 @@
 name: CD
 
+# Release + PyPI publish. No GH_PAT: PSR runs under a GitHub App token
+# (n24q02m-ci) so it can push the version commit/tag past the main branch ruleset;
+# PyPI publish uses Trusted Publishing (OIDC), no token secret.
+# Requires: repo variable CI_APP_ID, repo secret CI_APP_KEY, and the n24q02m-ci
+# App installed on this repo.
+
 on:
   workflow_dispatch:
     inputs:
@@ -25,20 +31,26 @@ jobs:
       released: ${{ steps.release.outputs.released }}
       tag: ${{ steps.release.outputs.tag }}
     steps:
+      - name: Generate GitHub App Token
+        id: app-token
+        uses: actions/create-github-app-token@v3
+        with:
+          app-id: ${{ vars.CI_APP_ID }}
+          private-key: ${{ secrets.CI_APP_KEY }}
       - uses: actions/checkout@v6
         with:
-          token: ${{ secrets.GH_PAT }}
+          token: ${{ steps.app-token.outputs.token }}
           fetch-depth: 0
       - uses: python-semantic-release/python-semantic-release@v10
         id: release
         with:
-          github_token: ${{ secrets.GH_PAT }}
+          github_token: ${{ steps.app-token.outputs.token }}
           prerelease: ${{ inputs.release_type == 'beta' }}
           prerelease_token: beta
       - uses: python-semantic-release/publish-action@v10
         if: steps.release.outputs.released == 'true'
         with:
-          github_token: ${{ secrets.GH_PAT }}
+          github_token: ${{ steps.app-token.outputs.token }}
           tag: ${{ steps.release.outputs.tag }}
 
   publish-pypi:
