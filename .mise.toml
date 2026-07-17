@@ -1,0 +1,17 @@
+# Mise configuration for agent-chat-plugin
+# https://mise.jdx.dev/
+#
+# agent-chat-plugin is a single-file, dependency-free stdlib CLI. The only dev
+# tool is ruff; there is nothing to build or install.
+
+[tools]
+python = "3.13"
+ruff = "latest"
+
+[tasks.lint]
+description = "Lint with ruff"
+run = "ruff check ."
+
+[tasks.smoke]
+description = "Smoke-test the CLI"
+run = "python chat.py --help"

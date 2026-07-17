@@ -1,0 +1,58 @@
+name: CD
+
+on:
+  workflow_dispatch:
+    inputs:
+      release_type:
+        description: "Release type"
+        required: true
+        type: choice
+        options: [beta, stable]
+
+permissions:
+  contents: write
+  id-token: write
+
+concurrency:
+  group: release
+  cancel-in-progress: false
+
+jobs:
+  release:
+    name: Semantic Release
+    runs-on: ubuntu-latest
+    outputs:
+      released: ${{ steps.release.outputs.released }}
+      tag: ${{ steps.release.outputs.tag }}
+    steps:
+      - uses: actions/checkout@v6
+        with:
+          token: ${{ secrets.GH_PAT }}
+          fetch-depth: 0
+      - uses: python-semantic-release/python-semantic-release@v10
+        id: release
+        with:
+          github_token: ${{ secrets.GH_PAT }}
+          prerelease: ${{ inputs.release_type == 'beta' }}
+          prerelease_token: beta
+      - uses: python-semantic-release/publish-action@v10
+        if: steps.release.outputs.released == 'true'
+        with:
+          github_token: ${{ secrets.GH_PAT }}
+          tag: ${{ steps.release.outputs.tag }}
+
+  publish-pypi:
+    name: Publish to PyPI
+    needs: release
+    if: needs.release.outputs.released == 'true'
+    runs-on: ubuntu-latest
+    permissions:
+      id-token: write
+    steps:
+      - uses: actions/checkout@v6
+        with:
+          ref: ${{ needs.release.outputs.tag }}
+      - uses: astral-sh/setup-uv@v7
+      - run: uv build
+      - name: Publish to PyPI (Trusted Publishing / OIDC)
+        run: uv publish --trusted-publishing always
