@@ -55,7 +55,15 @@ def die(msg: str, code: int = 1):
 # --- channel + message primitives -------------------------------------------
 
 def channel_dir(root: Path, channel: str) -> Path:
-    return root / channel
+    d = root / channel
+    try:
+        r_root = root.resolve()
+        r_d = d.resolve()
+        if not r_d.is_relative_to(r_root) or r_d == r_root:
+            die(f"invalid channel name: '{channel}'")
+    except Exception:
+        die(f"invalid channel name: '{channel}'")
+    return d
 
 
 def require_channel(root: Path, channel: str) -> Path:
