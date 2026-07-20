@@ -54,7 +54,18 @@ def die(msg: str, code: int = 1):
 
 # --- channel + message primitives -------------------------------------------
 
+def is_safe_path_component(name: str) -> bool:
+    """Check if a name is safe to use as a directory or file name without traversal."""
+    if not name or name in (".", ".."):
+        return False
+    if "/" in name or "\\" in name:
+        return False
+    return True
+
+
 def channel_dir(root: Path, channel: str) -> Path:
+    if not is_safe_path_component(channel):
+        die(f"invalid channel name '{channel}': path traversal is not allowed")
     return root / channel
 
 
@@ -353,6 +364,8 @@ def cmd_claim(root: Path, a):
     won the race -- exit non-zero so the caller moves on.
     """
     d = require_channel(root, a.channel)
+    if not is_safe_path_component(a.task):
+        die(f"invalid task name '{a.task}': path traversal is not allowed")
     src = d / a.task
     dst = d / (Path(a.task).stem + f".CLAIMED-{slugify(a.agent)}.md")
     try:
