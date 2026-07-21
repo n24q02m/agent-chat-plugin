@@ -210,6 +210,7 @@ def cmd_init(root: Path, a):
 def cmd_channels(root: Path, a):
     if not root.exists():
         print(f"(no channels yet under {root})")
+        print("Tip: use 'agent-chat init <channel_name>' to create one.")
         return
     rows = []
     for meta_path in sorted(root.glob("*/_meta.json")):
@@ -226,6 +227,7 @@ def cmd_channels(root: Path, a):
         rows.append((chan.name, ",".join(meta.get("members", [])) or "(open)", len(files), last))
     if not rows:
         print(f"(no channels yet under {root})")
+        print("Tip: use 'agent-chat init <channel_name>' to create one.")
         return
     w = max(len(r[0]) for r in rows)
     print(f"{'CHANNEL'.ljust(w)}  MSGS  MEMBERS / LAST")
