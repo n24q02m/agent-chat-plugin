@@ -1,0 +1,3 @@
+## 2024-07-21 - [Reading Entire Files for Frontmatter]
+**Learning:** [When parsing frontmatter from large markdown files (like chat messages which can have extensive bodies), using `.read_text()` followed by `.splitlines()` loads the entire file contents into memory and creates a massive list of lines. This causes unnecessary overhead and slows down parsing when only the first few lines are actually needed.]
+**Action:** [Always parse files line-by-line using an iterator (like `for line in file:`) when searching for specific markers near the start of the file. This prevents loading the entire message body into memory and is significantly faster, reducing overhead substantially for large files.]
