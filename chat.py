@@ -82,24 +82,28 @@ def parse_frontmatter(path: Path) -> dict:
     """
     meta: dict = {}
     try:
-        text = path.read_text(encoding="utf-8")
+        # Stream the file line-by-line rather than reading the whole thing into memory.
+        # This prevents massive memory bloat when parsing metadata from large messages.
+        with path.open(encoding="utf-8") as f:
+            first_line = f.readline()
+            if not first_line.startswith("---"):
+                return meta
+
+            found_end = False
+            for ln in f:
+                if ln.strip() == "---":
+                    found_end = True
+                    break
+                if ":" in ln:
+                    k, v = ln.split(":", 1)
+                    meta[k.strip()] = v.strip()
+
+            # If we reached EOF without finding a closing '---', it's not valid frontmatter.
+            if not found_end:
+                return {}
     except OSError:
-        return meta
-    if not text.startswith("---"):
-        return meta
-    lines = text.splitlines()
-    body_start = None
-    for i in range(1, len(lines)):
-        if lines[i].strip() == "---":
-            body_start = i
-            break
-    if body_start is None:
-        return meta
-    for ln in lines[1:body_start]:
-        if ":" not in ln:
-            continue
-        k, v = ln.split(":", 1)
-        meta[k.strip()] = v.strip()
+        return {}
+
     # Normalize `to` -> list of recipients (empty == everyone).
     raw = meta.get("to", "").strip()
     if raw in ("", "all", "[]", "*"):
