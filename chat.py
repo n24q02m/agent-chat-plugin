@@ -55,7 +55,10 @@ def die(msg: str, code: int = 1):
 # --- channel + message primitives -------------------------------------------
 
 def channel_dir(root: Path, channel: str) -> Path:
-    return root / channel
+    d = root / channel
+    if not d.resolve().is_relative_to(root.resolve()):
+        die("security: channel path traversal detected")
+    return d
 
 
 def require_channel(root: Path, channel: str) -> Path:
@@ -354,6 +357,8 @@ def cmd_claim(root: Path, a):
     """
     d = require_channel(root, a.channel)
     src = d / a.task
+    if not src.resolve().is_relative_to(d.resolve()):
+        die("security: task path traversal detected")
     dst = d / (Path(a.task).stem + f".CLAIMED-{slugify(a.agent)}.md")
     try:
         os.replace(src, dst)  # atomic on Windows + POSIX when same directory
