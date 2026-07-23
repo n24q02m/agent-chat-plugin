@@ -55,9 +55,10 @@ def die(msg: str, code: int = 1):
 # --- channel + message primitives -------------------------------------------
 
 def channel_dir(root: Path, channel: str) -> Path:
-    if "/" in channel or "\\" in channel or channel in (".", ".."):
-        die(f"invalid channel name: '{channel}'")
-    return root / channel
+    target = root / channel
+    if not target.resolve().is_relative_to(root.resolve()):
+        raise ValueError(f"invalid channel name: '{channel}'")
+    return target
 
 
 def require_channel(root: Path, channel: str) -> Path:
@@ -354,10 +355,10 @@ def cmd_claim(root: Path, a):
     `task-<id>.CLAIMED-<agent>.md`. If the source is already gone, another agent
     won the race -- exit non-zero so the caller moves on.
     """
-    if "/" in a.task or "\\" in a.task or a.task in (".", ".."):
-        die(f"invalid task name: '{a.task}'")
     d = require_channel(root, a.channel)
     src = d / a.task
+    if not src.resolve().is_relative_to(d.resolve()):
+        raise ValueError(f"invalid task name: '{a.task}'")
     dst = d / (Path(a.task).stem + f".CLAIMED-{slugify(a.agent)}.md")
     try:
         os.replace(src, dst)  # atomic on Windows + POSIX when same directory
