@@ -36,7 +36,7 @@ def main() -> None:
     sys.path.insert(0, plugin_root)
     try:
         import chat
-    except Exception:
+    except ImportError:
         return
 
     try:
@@ -73,6 +73,6 @@ def main() -> None:
 if __name__ == "__main__":
     try:
         main()
-    except Exception:
-        pass
+    except Exception as e:
+        print(f"session_inbox failed: {e}", file=sys.stderr)
     sys.exit(0)
