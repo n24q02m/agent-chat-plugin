@@ -55,6 +55,8 @@ def die(msg: str, code: int = 1):
 # --- channel + message primitives -------------------------------------------
 
 def channel_dir(root: Path, channel: str) -> Path:
+    if "/" in channel or "\\" in channel or channel in (".", ".."):
+        die(f"invalid channel name: '{channel}'")
     return root / channel
 
 
@@ -352,6 +354,8 @@ def cmd_claim(root: Path, a):
     `task-<id>.CLAIMED-<agent>.md`. If the source is already gone, another agent
     won the race -- exit non-zero so the caller moves on.
     """
+    if "/" in a.task or "\\" in a.task or a.task in (".", ".."):
+        die(f"invalid task name: '{a.task}'")
     d = require_channel(root, a.channel)
     src = d / a.task
     dst = d / (Path(a.task).stem + f".CLAIMED-{slugify(a.agent)}.md")
