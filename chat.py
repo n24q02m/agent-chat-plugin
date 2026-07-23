@@ -61,7 +61,7 @@ def channel_dir(root: Path, channel: str) -> Path:
 def require_channel(root: Path, channel: str) -> Path:
     d = channel_dir(root, channel)
     if not (d / "_meta.json").exists():
-        die(f"channel '{channel}' not found under {root} (run: init {channel})")
+        die(f"channel '{channel}' not found under {root} (run: python chat.py init {channel})")
     return d
 
 
@@ -209,7 +209,7 @@ def cmd_init(root: Path, a):
 
 def cmd_channels(root: Path, a):
     if not root.exists():
-        print(f"(no channels yet under {root})")
+        print(f"(no channels yet under {root} - try running: python chat.py init <channel_name>)")
         return
     rows = []
     for meta_path in sorted(root.glob("*/_meta.json")):
@@ -225,7 +225,7 @@ def cmd_channels(root: Path, a):
             last = f"#{_seq_from_name(files[-1].name)} {lm.get('from','?')}: {lm.get('title','')[:40]}"
         rows.append((chan.name, ",".join(meta.get("members", [])) or "(open)", len(files), last))
     if not rows:
-        print(f"(no channels yet under {root})")
+        print(f"(no channels yet under {root} - try running: python chat.py init <channel_name>)")
         return
     w = max(len(r[0]) for r in rows)
     print(f"{'CHANNEL'.ljust(w)}  MSGS  MEMBERS / LAST")
@@ -342,7 +342,7 @@ def cmd_peek(root: Path, a):
     for p in files:
         _print_message(p)
     if not files:
-        print(f"(channel '{a.channel}' is empty)")
+        print(f"(channel '{a.channel}' is empty - send a message using: python chat.py post {a.channel} --from <agent> --title <title>)")
 
 
 def cmd_claim(root: Path, a):
