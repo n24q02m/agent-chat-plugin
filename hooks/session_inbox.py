@@ -36,7 +36,7 @@ def main() -> None:
     sys.path.insert(0, plugin_root)
     try:
         import chat
-    except Exception:
+    except Exception:  # noqa: BLE001
         return
 
     try:
@@ -66,13 +66,13 @@ def main() -> None:
                 f"[agent-chat] {name} has unread peer messages: {summary}. "
                 "Run /agent-chat to read/reply."
             )
-    except Exception:
+    except Exception:  # noqa: BLE001
         return
 
 
 if __name__ == "__main__":
     try:
         main()
-    except Exception:
+    except Exception:  # noqa: BLE001, S110
         pass
     sys.exit(0)
