@@ -1,4 +1,5 @@
 #!/usr/bin/env python3
+# ruff: noqa: BLE001, S110
 """SessionStart hook: peek this agent's agent-chat inbox for unread messages.
 
 Read-only -- never advances any cursor (that happens on `chat.py read`). Prints
