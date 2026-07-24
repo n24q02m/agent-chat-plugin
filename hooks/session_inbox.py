@@ -66,7 +66,7 @@ def main() -> None:
                 f"[agent-chat] {name} has unread peer messages: {summary}. "
                 "Run /agent-chat to read/reply."
             )
-    except Exception as e:
+    except OSError as e:
         import logging
         logger = logging.getLogger(__name__)
         logger.warning(f"Failed to run session inbox hook: {e}")
@@ -76,7 +76,7 @@ def main() -> None:
 if __name__ == "__main__":
     try:
         main()
-    except Exception as e:
+    except OSError as e:
         import logging
         logger = logging.getLogger(__name__)
         logger.warning(f"Unhandled exception in session inbox hook: {e}")
