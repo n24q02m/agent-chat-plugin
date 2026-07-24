@@ -73,7 +73,7 @@ def main() -> None:
 if __name__ == "__main__":
     try:
         main()
-    except Exception as e:
+    except Exception as e:  # noqa: BLE001
         import logging
         logging.getLogger(__name__).debug("Failed to check session inbox: %s", e)
     sys.exit(0)
