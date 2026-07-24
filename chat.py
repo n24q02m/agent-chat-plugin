@@ -209,7 +209,7 @@ def cmd_init(root: Path, a):
 
 def cmd_channels(root: Path, a):
     if not root.exists():
-        print(f"(no channels yet under {root})")
+        print(f"(no channels yet under {root} - run 'python chat.py init <name>' to create one)")
         return
     rows = []
     for meta_path in sorted(root.glob("*/_meta.json")):
@@ -219,13 +219,13 @@ def cmd_channels(root: Path, a):
         except (OSError, ValueError):
             meta = {}
         files = message_files(chan)
-        last = "-"
+        last = "(empty)"
         if files:
             lm = parse_frontmatter(files[-1])
             last = f"#{_seq_from_name(files[-1].name)} {lm.get('from','?')}: {lm.get('title','')[:40]}"
         rows.append((chan.name, ",".join(meta.get("members", [])) or "(open)", len(files), last))
     if not rows:
-        print(f"(no channels yet under {root})")
+        print(f"(no channels yet under {root} - run 'python chat.py init <name>' to create one)")
         return
     w = max(len(r[0]) for r in rows)
     print(f"{'CHANNEL'.ljust(w)}  MSGS  MEMBERS / LAST")
@@ -342,7 +342,7 @@ def cmd_peek(root: Path, a):
     for p in files:
         _print_message(p)
     if not files:
-        print(f"(channel '{a.channel}' is empty)")
+        print(f"(channel '{a.channel}' is empty - run 'python chat.py post {a.channel} ...' to post)")
 
 
 def cmd_claim(root: Path, a):

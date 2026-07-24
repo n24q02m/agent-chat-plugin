@@ -1,0 +1,1 @@
+## 2024-05-24 - CLI Empty State Guidance\n**Learning:** Command-line interfaces often lack helpful next steps in empty states, confusing new users.\n**Action:** When implementing CLI commands that return empty lists or data, always include a call-to-action suggesting the command to populate data (e.g. 'run xyz init').
