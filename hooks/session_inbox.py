@@ -68,7 +68,8 @@ def main() -> None:
             )
     except Exception as e:
         import logging
-        logging.warning(f"Failed to run session inbox hook: {e}")
+        logger = logging.getLogger(__name__)
+        logger.warning(f"Failed to run session inbox hook: {e}")
         return
 
 
@@ -77,5 +78,6 @@ if __name__ == "__main__":
         main()
     except Exception as e:
         import logging
-        logging.warning(f"Unhandled exception in session inbox hook: {e}")
+        logger = logging.getLogger(__name__)
+        logger.warning(f"Unhandled exception in session inbox hook: {e}")
     sys.exit(0)
