@@ -66,7 +66,7 @@ def main() -> None:
                 f"[agent-chat] {name} has unread peer messages: {summary}. "
                 "Run /agent-chat to read/reply."
             )
-    except Exception as e:
+    except Exception as e:  # noqa: BLE001
         print(f"[agent-chat] error reading inbox: {e}", file=sys.stderr)
         return
 
@@ -74,6 +74,6 @@ def main() -> None:
 if __name__ == "__main__":
     try:
         main()
-    except Exception as e:
+    except Exception as e:  # noqa: BLE001
         print(f"[agent-chat] fatal error: {e}", file=sys.stderr)
     sys.exit(0)
