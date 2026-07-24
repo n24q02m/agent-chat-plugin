@@ -36,7 +36,7 @@ def main() -> None:
     sys.path.insert(0, plugin_root)
     try:
         import chat
-    except Exception:
+    except ImportError:
         return
 
     try:
@@ -66,13 +66,16 @@ def main() -> None:
                 f"[agent-chat] {name} has unread peer messages: {summary}. "
                 "Run /agent-chat to read/reply."
             )
-    except Exception:
+    except Exception as e:
+        import logging
+        logging.warning(f"Failed to run session inbox hook: {e}")
         return
 
 
 if __name__ == "__main__":
     try:
         main()
-    except Exception:
-        pass
+    except Exception as e:
+        import logging
+        logging.warning(f"Unhandled exception in session inbox hook: {e}")
     sys.exit(0)
