@@ -82,24 +82,31 @@ def parse_frontmatter(path: Path) -> dict:
     """
     meta: dict = {}
     try:
-        text = path.read_text(encoding="utf-8")
+        # Performance optimization: parse frontmatter lazily line-by-line
+        # to avoid reading massive message bodies into memory
+        with path.open(encoding="utf-8") as f:
+            first_line = f.readline()
+            if not first_line.startswith("---"):
+                return meta
+
+            temp_meta = {}
+            found_end = False
+            for line in f:
+                line = line.strip()
+                if line == "---":
+                    found_end = True
+                    break
+                if ":" in line:
+                    k, v = line.split(":", 1)
+                    temp_meta[k.strip()] = v.strip()
+
+            if found_end:
+                meta = temp_meta
+            else:
+                return {} # Reset to empty dict if no closing ---
     except OSError:
         return meta
-    if not text.startswith("---"):
-        return meta
-    lines = text.splitlines()
-    body_start = None
-    for i in range(1, len(lines)):
-        if lines[i].strip() == "---":
-            body_start = i
-            break
-    if body_start is None:
-        return meta
-    for ln in lines[1:body_start]:
-        if ":" not in ln:
-            continue
-        k, v = ln.split(":", 1)
-        meta[k.strip()] = v.strip()
+
     # Normalize `to` -> list of recipients (empty == everyone).
     raw = meta.get("to", "").strip()
     if raw in ("", "all", "[]", "*"):
