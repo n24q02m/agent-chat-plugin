@@ -18,7 +18,10 @@ jobs:
       - uses: actions/setup-python@ece7cb06caefa5fff74198d8649806c4678c61a1 # v6.3.0
         with:
           python-version: "3.13"
-      - run: pip install ruff
+      # Pinned to the same version .pre-commit-config.yaml uses. Unpinned, a ruff
+      # release that widens the default rule set turns main red with no code
+      # change (0.16.0 did exactly that), and CI disagrees with the local hook.
+      - run: pip install ruff==0.15.7
       - run: ruff check .
       - name: byte-compile
         run: python -m py_compile chat.py hooks/session_inbox.py
