@@ -264,18 +264,28 @@ def _read_body(a) -> str:
     return data
 
 
+def _sanitize_fm(val: str) -> str:
+    """Sanitize frontmatter values to prevent newline injection."""
+    if val is None:
+        return ""
+    return str(val).replace("\n", " ").replace("\r", " ")
+
+
 def cmd_post(root: Path, a):
     d = require_channel(root, a.channel)
     body = _read_body(a)
-    to = a.to or "all"
+    to = _sanitize_fm(a.to or "all")
+    sender = _sanitize_fm(a.sender)
+    title = _sanitize_fm(a.title)
+    status = _sanitize_fm(a.status)
     lock = _acquire_lock(d)
     try:
         seq = _next_seq(d)
-        fname = f"{seq:04d}-{slugify(a.sender)}-{slugify(a.title)}.md"
+        fname = f"{seq:04d}-{slugify(sender)}-{slugify(title)}.md"
         fm = [
             "---",
             f"seq: {seq}",
-            f"from: {a.sender}",
+            f"from: {sender}",
             f"to: {to}",
         ]
         if a.reply:
@@ -283,8 +293,8 @@ def cmd_post(root: Path, a):
         fm += [
             f"channel: {a.channel}",
             f"ts: {now_iso()}",
-            f"status: {a.status}",
-            f"title: {a.title}",
+            f"status: {status}",
+            f"title: {title}",
             "---",
             "",
         ]
