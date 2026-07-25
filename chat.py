@@ -55,10 +55,7 @@ def die(msg: str, code: int = 1):
 # --- channel + message primitives -------------------------------------------
 
 def channel_dir(root: Path, channel: str) -> Path:
-    target = root / channel
-    if not target.resolve().is_relative_to(root.resolve()):
-        raise ValueError(f"invalid channel name: '{channel}'")
-    return target
+    return root / channel
 
 
 def require_channel(root: Path, channel: str) -> Path:
@@ -357,8 +354,6 @@ def cmd_claim(root: Path, a):
     """
     d = require_channel(root, a.channel)
     src = d / a.task
-    if not src.resolve().is_relative_to(d.resolve()):
-        raise ValueError(f"invalid task name: '{a.task}'")
     dst = d / (Path(a.task).stem + f".CLAIMED-{slugify(a.agent)}.md")
     try:
         os.replace(src, dst)  # atomic on Windows + POSIX when same directory
