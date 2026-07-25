@@ -5,7 +5,7 @@
 # tool is ruff; there is nothing to build or install.
 
 [tools]
-python = "3.13"
+python = "3.14.6"
 ruff = "latest"
 
 [tasks.lint]
