@@ -66,13 +66,16 @@ def main() -> None:
                 f"[agent-chat] {name} has unread peer messages: {summary}. "
                 "Run /agent-chat to read/reply."
             )
-    except Exception:
+    # SystemExit too: chat.channel_dir() calls die() on a malformed channel name
+    # (e.g. a stray entry in AGENT_CHAT_CHANNELS), and SystemExit is a
+    # BaseException -- an `except Exception` alone would let it fail the session.
+    except (Exception, SystemExit):
         return
 
 
 if __name__ == "__main__":
     try:
         main()
-    except Exception:
+    except (Exception, SystemExit):
         pass
     sys.exit(0)
