@@ -234,7 +234,7 @@ def cmd_channels(root: Path, a):
     if not rows:
         print(f"(no channels yet under {root})")
         return
-    w = max(len(r[0]) for r in rows)
+    w = max(len("CHANNEL"), max(len(r[0]) for r in rows))
     print(f"{'CHANNEL'.ljust(w)}  MSGS  MEMBERS / LAST")
     for name, members, n, last in rows:
         print(f"{name.ljust(w)}  {str(n).rjust(4)}  {members}")
