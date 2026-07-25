@@ -1,3 +1,7 @@
 ## 2024-06-25 - Frontmatter Parsing Pitfall
 **Learning:** Using `Path.read_text()` to parse frontmatter from markdown files loads the entire file contents into memory. If message bodies are large, this becomes a major performance bottleneck since only the first few lines are needed.
 **Action:** Always stream files line-by-line (e.g., using `path.open()` and an iterator) when parsing headers or frontmatter, stopping as soon as the relevant section is extracted to avoid O(N) memory allocation and parsing where N is the total file size.
+
+## 2026-07-25 - The frontmatter read is done; measure before proposing the next one
+**Learning:** Seven PRs proposed the same `parse_frontmatter` streaming rewrite, none with a measurement. The change is now in (`chat.py:78`). Measured afterwards on the real corpus (82 messages, 161 KB, median message 1.8 KB): 21.82 ms -> 19.14 ms per full scan, a 2.7 ms saving. It only becomes interesting at sizes this repo does not currently produce -- 50 files of 200 KB go from 86 ms to 8 ms. `_seq_from_name` (`chat.py:68`) is a bounded regex over a filename and is not worth rewriting; a PR claiming "~2.5x faster" for it shipped no numbers.
+**Action:** Put a before/after measurement in the PR body, taken over this repo's own corpus (`$AGENT_CHAT_ROOT/*/*.md`, median of at least 20 runs), and propose the change only when that measured delta is material. The paths worth measuring are the ones called per message: the `cmd_wait` poll loop (`chat.py:320`) and `hooks/session_inbox.py:60`, which runs at every SessionStart.
