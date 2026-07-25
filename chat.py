@@ -54,7 +54,14 @@ def die(msg: str, code: int = 1):
 
 # --- channel + message primitives -------------------------------------------
 
+def _check_safe_name(name: str, kind: str):
+    """Prevent path traversal vulnerabilities."""
+    if not name or "/" in name or "\\" in name or name in (".", ".."):
+        die(f"invalid {kind} name (path traversal blocked): '{name}'")
+
+
 def channel_dir(root: Path, channel: str) -> Path:
+    _check_safe_name(channel, "channel")
     return root / channel
 
 
@@ -352,6 +359,7 @@ def cmd_claim(root: Path, a):
     `task-<id>.CLAIMED-<agent>.md`. If the source is already gone, another agent
     won the race -- exit non-zero so the caller moves on.
     """
+    _check_safe_name(a.task, "task")
     d = require_channel(root, a.channel)
     src = d / a.task
     dst = d / (Path(a.task).stem + f".CLAIMED-{slugify(a.agent)}.md")
