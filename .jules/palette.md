@@ -1,0 +1,3 @@
+## 2024-05-24 - CLI Output Alignment Bug
+**Learning:** Fixed a visual alignment issue in the CLI `channels` command output where columns were misaligned if all channel names were shorter than the column header "CHANNEL". Note that directory names for agent memories should be `.jules` not `.Jules` to match the existing convention and avoid creating extra directories on case-sensitive filesystems.
+**Action:** Always ensure dynamic column width calculation accounts for the length of the column headers, not just the data, to guarantee visual alignment. Remember to use `.jules` instead of `.Jules` for memory directories.
