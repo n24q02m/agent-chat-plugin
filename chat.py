@@ -272,19 +272,23 @@ def cmd_post(root: Path, a):
     try:
         seq = _next_seq(d)
         fname = f"{seq:04d}-{slugify(a.sender)}-{slugify(a.title)}.md"
+
+        def _sf(text: str) -> str:
+            return str(text).replace("\n", " ").replace("\r", " ")
+
         fm = [
             "---",
             f"seq: {seq}",
-            f"from: {a.sender}",
-            f"to: {to}",
+            f"from: {_sf(a.sender)}",
+            f"to: {_sf(to)}",
         ]
         if a.reply:
             fm.append(f"reply_to: {a.reply}")
         fm += [
-            f"channel: {a.channel}",
+            f"channel: {_sf(a.channel)}",
             f"ts: {now_iso()}",
-            f"status: {a.status}",
-            f"title: {a.title}",
+            f"status: {_sf(a.status)}",
+            f"title: {_sf(a.title)}",
             "---",
             "",
         ]
