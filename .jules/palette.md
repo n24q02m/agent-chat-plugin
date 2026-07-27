@@ -5,3 +5,7 @@
 ## 2026-07-25 - Empty states already exist; keep CLI output ASCII
 **Learning:** `chat.py` already prints an empty state on every path that can produce no output -- `cmd_channels` at both of its exits (`chat.py:212`, `chat.py:229`), `cmd_read` when nothing is unread (`chat.py:311`), `cmd_peek` on an empty channel (`chat.py:345`) -- and `require_channel` (`chat.py:64`) already names the recovery command. Four separate PRs proposed appending a call-to-action to those same lines; only the column-width fix addressed something that was actually broken. One of them used an em dash, which does not survive this CLI's own portability claim: the module docstring states it runs identically on Windows, WSL and Linux, and on a Windows console `sys.stdout.encoding` is `cp1252`, where non-ASCII is emitted as a byte that is invalid UTF-8 or raises `UnicodeEncodeError`.
 **Action:** Run the command and paste the real before/after terminal output into the PR body as the evidence that a UX defect exists. Keep all CLI output ASCII -- use `-`, never an em dash. Write this journal to `.jules/` in lowercase; `.Jules/` is a separate, unread directory on a case-sensitive filesystem.
+
+## 2024-05-25 - Interactive stdin prompts
+**Learning:** When reading from stdin in a CLI, if the user doesn't pipe input they might just see a hanging prompt and not realize they need to type and send EOF (Ctrl-D).
+**Action:** Use `sys.stdin.isatty()` to detect interactive sessions and provide a helpful prompt to `stderr` without breaking piped input.
