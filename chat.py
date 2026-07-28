@@ -193,8 +193,13 @@ def write_cursor(chan: Path, agent: str, seq: int):
 
 
 def max_seq(chan: Path) -> int:
-    files = message_files(chan)
-    return _seq_from_name(files[-1].name) if files else 0
+    mx = 0
+    # ⚡ Bolt: O(N) scan using glob avoids O(N log N) sorting overhead of message_files()
+    for p in chan.glob("*.md"):
+        s = _seq_from_name(p.name)
+        if s is not None and s > mx:
+            mx = s
+    return mx
 
 
 # --- commands ----------------------------------------------------------------
@@ -326,15 +331,19 @@ def cmd_wait(root: Path, a):
     deadline = time.time() + a.timeout
     while True:
         found = []
-        for p in message_files(d):
+        # ⚡ Bolt: O(N) scan avoids loading and sorting all files on every poll cycle.
+        for p in d.glob("*.md"):
             seq = _seq_from_name(p.name)
-            if seq <= cur:
+            if seq is None or seq <= cur:
                 continue
             meta = parse_frontmatter(p)
             if is_relevant(meta, a.agent):
-                found.append(p)
+                # ⚡ Bolt: store parsed seq to avoid redundant recalculation during sort
+                found.append((seq, p))
         if found:
-            for p in found:
+            # ⚡ Bolt: Only sort the matched messages (usually very few), not the whole directory
+            found.sort(key=lambda t: t[0])
+            for seq, p in found:
                 _print_message(p)
             write_cursor(d, a.agent, max_seq(d))
             return
