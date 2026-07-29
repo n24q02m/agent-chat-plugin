@@ -47,6 +47,13 @@ def slugify(text: str, maxlen: int = 40) -> str:
     return (s[:maxlen].rstrip("-")) or "msg"
 
 
+def _sanitize_header(text: str) -> str:
+    """Sanitize strings for YAML frontmatter to prevent injection."""
+    if not isinstance(text, str):
+        return str(text) if text is not None else ""
+    return re.sub(r"[\r\n]+", " ", text).strip()
+
+
 def die(msg: str, code: int = 1):
     print(f"agent-chat: {msg}", file=sys.stderr)
     raise SystemExit(code)
@@ -267,24 +274,28 @@ def _read_body(a) -> str:
 def cmd_post(root: Path, a):
     d = require_channel(root, a.channel)
     body = _read_body(a)
-    to = a.to or "all"
+    to = _sanitize_header(a.to or "all")
+    sender = _sanitize_header(a.sender)
+    title = _sanitize_header(a.title)
+    status = _sanitize_header(a.status)
+    channel_name = _sanitize_header(a.channel)
     lock = _acquire_lock(d)
     try:
         seq = _next_seq(d)
-        fname = f"{seq:04d}-{slugify(a.sender)}-{slugify(a.title)}.md"
+        fname = f"{seq:04d}-{slugify(sender)}-{slugify(title)}.md"
         fm = [
             "---",
             f"seq: {seq}",
-            f"from: {a.sender}",
+            f"from: {sender}",
             f"to: {to}",
         ]
         if a.reply:
-            fm.append(f"reply_to: {a.reply}")
+            fm.append(f"reply_to: {_sanitize_header(str(a.reply))}")
         fm += [
-            f"channel: {a.channel}",
+            f"channel: {channel_name}",
             f"ts: {now_iso()}",
-            f"status: {a.status}",
-            f"title: {a.title}",
+            f"status: {status}",
+            f"title: {title}",
             "---",
             "",
         ]
