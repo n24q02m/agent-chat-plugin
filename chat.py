@@ -164,12 +164,7 @@ def _release_lock(lock: Path):
 
 
 def _next_seq(chan: Path) -> int:
-    mx = 0
-    for p in chan.glob("*.md"):
-        s = _seq_from_name(p.name)
-        if s is not None:
-            mx = max(mx, s)
-    return mx + 1
+    return max_seq(chan) + 1
 
 
 # --- cursors -----------------------------------------------------------------
@@ -193,8 +188,12 @@ def write_cursor(chan: Path, agent: str, seq: int):
 
 
 def max_seq(chan: Path) -> int:
-    files = message_files(chan)
-    return _seq_from_name(files[-1].name) if files else 0
+    mx = 0
+    for p in chan.glob("*.md"):
+        s = _seq_from_name(p.name)
+        if s is not None and s > mx:
+            mx = s
+    return mx
 
 
 # --- commands ----------------------------------------------------------------
@@ -227,12 +226,23 @@ def cmd_channels(root: Path, a):
             meta = json.loads(meta_path.read_text(encoding="utf-8"))
         except (OSError, ValueError):
             meta = {}
-        files = message_files(chan)
+
+        msg_count = 0
+        max_s = -1
+        latest_file = None
+        for p in chan.glob("*.md"):
+            s = _seq_from_name(p.name)
+            if s is not None:
+                msg_count += 1
+                if s > max_s:
+                    max_s = s
+                    latest_file = p
+
         last = "-"
-        if files:
-            lm = parse_frontmatter(files[-1])
-            last = f"#{_seq_from_name(files[-1].name)} {lm.get('from','?')}: {lm.get('title','')[:40]}"
-        rows.append((chan.name, ",".join(meta.get("members", [])) or "(open)", len(files), last))
+        if latest_file:
+            lm = parse_frontmatter(latest_file)
+            last = f"#{max_s} {lm.get('from','?')}: {lm.get('title','')[:40]}"
+        rows.append((chan.name, ",".join(meta.get("members", [])) or "(open)", msg_count, last))
     if not rows:
         print(f"(no channels yet under {root})")
         return
@@ -249,7 +259,8 @@ def cmd_roster(root: Path, a):
     print(f"channel : {meta.get('channel')}")
     print(f"topic   : {meta.get('topic') or '(none)'}")
     print(f"members : {', '.join(meta.get('members', [])) or '(open)'}")
-    print(f"messages: {len(message_files(d))}")
+    msg_count = sum(1 for p in d.glob("*.md") if _seq_from_name(p.name) is not None)
+    print(f"messages: {msg_count}")
 
 
 def _read_body(a) -> str:
@@ -326,18 +337,21 @@ def cmd_wait(root: Path, a):
     deadline = time.time() + a.timeout
     while True:
         found = []
-        for p in message_files(d):
+        for p in d.glob("*.md"):
             seq = _seq_from_name(p.name)
-            if seq <= cur:
-                continue
-            meta = parse_frontmatter(p)
-            if is_relevant(meta, a.agent):
-                found.append(p)
+            if seq is not None and seq > cur:
+                found.append((seq, p))
         if found:
-            for p in found:
-                _print_message(p)
-            write_cursor(d, a.agent, max_seq(d))
-            return
+            found.sort(key=lambda x: x[0])
+            has_relevant = False
+            for seq, p in found:
+                meta = parse_frontmatter(p)
+                if is_relevant(meta, a.agent):
+                    _print_message(p)
+                    has_relevant = True
+            if has_relevant:
+                write_cursor(d, a.agent, max_seq(d))
+                return
         if time.time() >= deadline:
             print(f"(timeout after {a.timeout}s: no new messages for {a.agent} in '{a.channel}')",
                   file=sys.stderr)
