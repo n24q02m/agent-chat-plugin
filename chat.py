@@ -193,8 +193,14 @@ def write_cursor(chan: Path, agent: str, seq: int):
 
 
 def max_seq(chan: Path) -> int:
-    files = message_files(chan)
-    return _seq_from_name(files[-1].name) if files else 0
+    # ⚡ Bolt: Prefer O(N) linear scan over loading and sorting all files
+    # via message_files() to avoid unnecessary CPU and memory overhead.
+    mx = 0
+    for p in chan.glob("*.md"):
+        seq = _seq_from_name(p.name)
+        if seq is not None and seq > mx:
+            mx = seq
+    return mx
 
 
 # --- commands ----------------------------------------------------------------
@@ -227,12 +233,23 @@ def cmd_channels(root: Path, a):
             meta = json.loads(meta_path.read_text(encoding="utf-8"))
         except (OSError, ValueError):
             meta = {}
-        files = message_files(chan)
+        # ⚡ Bolt: Use O(N) linear scan for counts and finding the latest file
+        # to avoid loading and sorting everything just to get the length/last item.
+        count = 0
+        last_file = None
+        max_s = -1
+        for p in chan.glob("*.md"):
+            s = _seq_from_name(p.name)
+            if s is not None:
+                count += 1
+                if s > max_s:
+                    max_s = s
+                    last_file = p
         last = "-"
-        if files:
-            lm = parse_frontmatter(files[-1])
-            last = f"#{_seq_from_name(files[-1].name)} {lm.get('from','?')}: {lm.get('title','')[:40]}"
-        rows.append((chan.name, ",".join(meta.get("members", [])) or "(open)", len(files), last))
+        if last_file:
+            lm = parse_frontmatter(last_file)
+            last = f"#{max_s} {lm.get('from','?')}: {lm.get('title','')[:40]}"
+        rows.append((chan.name, ",".join(meta.get("members", [])) or "(open)", count, last))
     if not rows:
         print(f"(no channels yet under {root})")
         return
@@ -326,15 +343,18 @@ def cmd_wait(root: Path, a):
     deadline = time.time() + a.timeout
     while True:
         found = []
-        for p in message_files(d):
+        # ⚡ Bolt: Prefer O(N) linear scan over sorting the whole directory
+        # every poll interval. We only sort the small subset of new matches.
+        for p in d.glob("*.md"):
             seq = _seq_from_name(p.name)
-            if seq <= cur:
+            if seq is None or seq <= cur:
                 continue
             meta = parse_frontmatter(p)
             if is_relevant(meta, a.agent):
-                found.append(p)
+                found.append((seq, p))
         if found:
-            for p in found:
+            found.sort(key=lambda x: x[0])
+            for _, p in found:
                 _print_message(p)
             write_cursor(d, a.agent, max_seq(d))
             return
