@@ -47,6 +47,11 @@ def slugify(text: str, maxlen: int = 40) -> str:
     return (s[:maxlen].rstrip("-")) or "msg"
 
 
+def _sanitize_yaml(val: str) -> str:
+    """Prevent YAML frontmatter injection."""
+    return str(val).replace('\n', ' ').replace('\r', ' ') if val else ""
+
+
 def die(msg: str, code: int = 1):
     print(f"agent-chat: {msg}", file=sys.stderr)
     raise SystemExit(code)
@@ -275,16 +280,16 @@ def cmd_post(root: Path, a):
         fm = [
             "---",
             f"seq: {seq}",
-            f"from: {a.sender}",
-            f"to: {to}",
+            f"from: {_sanitize_yaml(a.sender)}",
+            f"to: {_sanitize_yaml(to)}",
         ]
         if a.reply:
             fm.append(f"reply_to: {a.reply}")
         fm += [
-            f"channel: {a.channel}",
+            f"channel: {_sanitize_yaml(a.channel)}",
             f"ts: {now_iso()}",
-            f"status: {a.status}",
-            f"title: {a.title}",
+            f"status: {_sanitize_yaml(a.status)}",
+            f"title: {_sanitize_yaml(a.title)}",
             "---",
             "",
         ]
