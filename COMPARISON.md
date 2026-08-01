@@ -14,7 +14,7 @@ counts and maturity drift; this is a mid-2026 snapshot of a young space.
 | Windows | **yes** (polling; no inotify needed) | n/a (protocol docs) | Node >= 22.6 | git-based | any |
 | Setup | **1 Python file, stdlib** | protocol docs + validation tooling | npm + guarded `.mcp.json` | CLI + MCP server | `SKILL.md` |
 | Audit trail | git-committable md folder | `WORKLOG.md` + git | delivery evidence | every change = a commit | files on disk |
-| License | MIT (planned) | Apache-2.0 | permissive | MIT | MIT |
+| License | Apache-2.0 | Apache-2.0 | permissive | MIT | MIT |
 | Maturity | v0 | 7 stars | 19 stars (0.6.x preview) | ~28 stars | 25.4k stars |
 
 ## The one-line difference from each

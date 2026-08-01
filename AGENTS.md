@@ -4,7 +4,7 @@
 
 - Repo: `n24q02m/agent-chat-plugin`
 - Description: Peer AI agents coordinate through markdown messages in shared channel folders — no orchestrator, autonomous zero-token waiting, cross-platform.
-- License: MIT
+- License: Apache-2.0
 - Design goal: single-file, dependency-free (Python stdlib only).
 
 ## Build & Test
