@@ -82,6 +82,13 @@ def message_files(chan: Path):
     return sorted(files, key=lambda p: _seq_from_name(p.name))
 
 
+def _sanitize_yaml_value(value: str) -> str:
+    """Sanitize newlines from string values to prevent frontmatter injection."""
+    if not isinstance(value, str):
+        return value
+    return value.replace("\n", " ").replace("\r", "")
+
+
 def parse_frontmatter(path: Path) -> dict:
     """Minimal front-matter reader: the block between the first two '---' lines.
 
@@ -275,16 +282,16 @@ def cmd_post(root: Path, a):
         fm = [
             "---",
             f"seq: {seq}",
-            f"from: {a.sender}",
-            f"to: {to}",
+            f"from: {_sanitize_yaml_value(a.sender)}",
+            f"to: {_sanitize_yaml_value(to)}",
         ]
         if a.reply:
-            fm.append(f"reply_to: {a.reply}")
+            fm.append(f"reply_to: {_sanitize_yaml_value(str(a.reply))}")
         fm += [
-            f"channel: {a.channel}",
+            f"channel: {_sanitize_yaml_value(a.channel)}",
             f"ts: {now_iso()}",
-            f"status: {a.status}",
-            f"title: {a.title}",
+            f"status: {_sanitize_yaml_value(a.status)}",
+            f"title: {_sanitize_yaml_value(a.title)}",
             "---",
             "",
         ]
