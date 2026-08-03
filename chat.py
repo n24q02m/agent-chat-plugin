@@ -193,8 +193,14 @@ def write_cursor(chan: Path, agent: str, seq: int):
 
 
 def max_seq(chan: Path) -> int:
-    files = message_files(chan)
-    return _seq_from_name(files[-1].name) if files else 0
+    # PERF: O(N) linear scan to find max sequence without allocating and sorting
+    # all files via message_files()
+    mx = 0
+    for p in chan.glob("*.md"):
+        s = _seq_from_name(p.name)
+        if s is not None and s > mx:
+            mx = s
+    return mx
 
 
 # --- commands ----------------------------------------------------------------
@@ -325,19 +331,24 @@ def cmd_wait(root: Path, a):
     cur = read_cursor(d, a.agent)
     deadline = time.time() + a.timeout
     while True:
+        # PERF: O(N) scan for new messages, only sort what we need to read
         found = []
-        for p in message_files(d):
+        for p in d.glob("*.md"):
             seq = _seq_from_name(p.name)
-            if seq <= cur:
-                continue
-            meta = parse_frontmatter(p)
-            if is_relevant(meta, a.agent):
-                found.append(p)
+            if seq is not None and seq > cur:
+                found.append((seq, p))
         if found:
-            for p in found:
-                _print_message(p)
-            write_cursor(d, a.agent, max_seq(d))
-            return
+            found.sort()
+            new_msgs = []
+            for _, p in found:
+                meta = parse_frontmatter(p)
+                if is_relevant(meta, a.agent):
+                    new_msgs.append(p)
+            if new_msgs:
+                for p in new_msgs:
+                    _print_message(p)
+                write_cursor(d, a.agent, max_seq(d))
+                return
         if time.time() >= deadline:
             print(f"(timeout after {a.timeout}s: no new messages for {a.agent} in '{a.channel}')",
                   file=sys.stderr)
