@@ -51,7 +51,9 @@ def main() -> None:
                 continue
             cursor = chat.read_cursor(chan_dir, name)
             unread = 0
-            for p in chat.message_files(chan_dir):
+            # ⚡ Bolt Optimization: Use O(N) chan_dir.glob("*.md") instead of sorting all files via chat.message_files()
+            # We only need to count them, not read them in order
+            for p in chan_dir.glob("*.md"):
                 seq = chat._seq_from_name(p.name)
                 if seq is None or seq <= cursor:
                     continue
