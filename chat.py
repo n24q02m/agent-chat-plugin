@@ -42,6 +42,10 @@ def now_iso() -> str:
     return _dt.datetime.now().astimezone().isoformat(timespec="seconds")
 
 
+def _sanitize_fm(val) -> str:
+    return str(val).replace('\n', ' ').replace('\r', '')
+
+
 def slugify(text: str, maxlen: int = 40) -> str:
     s = re.sub(r"[^a-z0-9]+", "-", text.lower()).strip("-")
     return (s[:maxlen].rstrip("-")) or "msg"
@@ -275,16 +279,16 @@ def cmd_post(root: Path, a):
         fm = [
             "---",
             f"seq: {seq}",
-            f"from: {a.sender}",
-            f"to: {to}",
+            f"from: {_sanitize_fm(a.sender)}",
+            f"to: {_sanitize_fm(to)}",
         ]
         if a.reply:
-            fm.append(f"reply_to: {a.reply}")
+            fm.append(f"reply_to: {_sanitize_fm(a.reply)}")
         fm += [
-            f"channel: {a.channel}",
+            f"channel: {_sanitize_fm(a.channel)}",
             f"ts: {now_iso()}",
-            f"status: {a.status}",
-            f"title: {a.title}",
+            f"status: {_sanitize_fm(a.status)}",
+            f"title: {_sanitize_fm(a.title)}",
             "---",
             "",
         ]
