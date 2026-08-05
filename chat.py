@@ -264,6 +264,11 @@ def _read_body(a) -> str:
     return data
 
 
+def _sanitize_yaml_value(value) -> str:
+    """Remove newlines to prevent YAML frontmatter injection."""
+    return str(value).replace("\n", " ").replace("\r", " ")
+
+
 def cmd_post(root: Path, a):
     d = require_channel(root, a.channel)
     body = _read_body(a)
@@ -274,17 +279,17 @@ def cmd_post(root: Path, a):
         fname = f"{seq:04d}-{slugify(a.sender)}-{slugify(a.title)}.md"
         fm = [
             "---",
-            f"seq: {seq}",
-            f"from: {a.sender}",
-            f"to: {to}",
+            f"seq: {_sanitize_yaml_value(seq)}",
+            f"from: {_sanitize_yaml_value(a.sender)}",
+            f"to: {_sanitize_yaml_value(to)}",
         ]
         if a.reply:
-            fm.append(f"reply_to: {a.reply}")
+            fm.append(f"reply_to: {_sanitize_yaml_value(a.reply)}")
         fm += [
-            f"channel: {a.channel}",
+            f"channel: {_sanitize_yaml_value(a.channel)}",
             f"ts: {now_iso()}",
-            f"status: {a.status}",
-            f"title: {a.title}",
+            f"status: {_sanitize_yaml_value(a.status)}",
+            f"title: {_sanitize_yaml_value(a.title)}",
             "---",
             "",
         ]
