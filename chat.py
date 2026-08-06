@@ -193,8 +193,8 @@ def write_cursor(chan: Path, agent: str, seq: int):
 
 
 def max_seq(chan: Path) -> int:
-    files = message_files(chan)
-    return _seq_from_name(files[-1].name) if files else 0
+    # O(N) linear scan without sorting
+    return max(0, _next_seq(chan) - 1)
 
 
 # --- commands ----------------------------------------------------------------
@@ -326,15 +326,16 @@ def cmd_wait(root: Path, a):
     deadline = time.time() + a.timeout
     while True:
         found = []
-        for p in message_files(d):
+        # O(N) linear scan without sorting files on every interval
+        for p in d.glob("*.md"):
             seq = _seq_from_name(p.name)
-            if seq <= cur:
-                continue
-            meta = parse_frontmatter(p)
-            if is_relevant(meta, a.agent):
-                found.append(p)
+            if seq is not None and seq > cur:
+                meta = parse_frontmatter(p)
+                if is_relevant(meta, a.agent):
+                    found.append((seq, p))
         if found:
-            for p in found:
+            found.sort(key=lambda x: x[0])
+            for _, p in found:
                 _print_message(p)
             write_cursor(d, a.agent, max_seq(d))
             return
