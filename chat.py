@@ -54,6 +54,13 @@ def die(msg: str, code: int = 1):
 
 # --- channel + message primitives -------------------------------------------
 
+def _sanitize_yaml(val) -> str:
+    """Sanitize values for YAML frontmatter to prevent injection via newlines."""
+    if val is None:
+        return ""
+    return str(val).replace("\n", " ").replace("\r", "")
+
+
 def _check_safe_name(name: str, kind: str):
     """Prevent path traversal vulnerabilities."""
     if not name or "/" in name or "\\" in name or name in (".", ".."):
@@ -274,17 +281,17 @@ def cmd_post(root: Path, a):
         fname = f"{seq:04d}-{slugify(a.sender)}-{slugify(a.title)}.md"
         fm = [
             "---",
-            f"seq: {seq}",
-            f"from: {a.sender}",
-            f"to: {to}",
+            f"seq: {_sanitize_yaml(seq)}",
+            f"from: {_sanitize_yaml(a.sender)}",
+            f"to: {_sanitize_yaml(to)}",
         ]
-        if a.reply:
-            fm.append(f"reply_to: {a.reply}")
+        if a.reply is not None:
+            fm.append(f"reply_to: {_sanitize_yaml(a.reply)}")
         fm += [
-            f"channel: {a.channel}",
+            f"channel: {_sanitize_yaml(a.channel)}",
             f"ts: {now_iso()}",
-            f"status: {a.status}",
-            f"title: {a.title}",
+            f"status: {_sanitize_yaml(a.status)}",
+            f"title: {_sanitize_yaml(a.title)}",
             "---",
             "",
         ]
