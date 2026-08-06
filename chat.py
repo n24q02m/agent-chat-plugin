@@ -258,6 +258,8 @@ def _read_body(a) -> str:
     if a.body_file:
         return Path(a.body_file).read_text(encoding="utf-8")
     # Default: read from stdin so agents can pipe long markdown bodies.
+    if sys.stdin.isatty():
+        print("(Enter message body. Press Ctrl-D (or Ctrl-Z and Enter on Windows) to finish)", file=sys.stderr)
     data = sys.stdin.read()
     if not data.strip():
         die("empty body (pass --body, --body-file, or pipe via stdin)")
