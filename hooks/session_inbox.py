@@ -51,12 +51,18 @@ def main() -> None:
                 continue
             cursor = chat.read_cursor(chan_dir, name)
             unread = 0
-            for p in chat.message_files(chan_dir):
-                seq = chat._seq_from_name(p.name)
-                if seq is None or seq <= cursor:
-                    continue
-                if chat.is_relevant(chat.parse_frontmatter(p), name):
-                    unread += 1
+            # ⚡ Bolt: avoid sorting all files via message_files() on startup poll
+            for p in chan_dir.glob("*.md"):
+                filename = p.name
+                dash_idx = filename.find("-")
+                if dash_idx != -1:
+                    try:
+                        seq = int(filename[:dash_idx])
+                        if seq > cursor:
+                            if chat.is_relevant(chat.parse_frontmatter(p), name):
+                                unread += 1
+                    except ValueError:
+                        pass
             if unread:
                 unread_by_channel.append((ch, unread))
 
