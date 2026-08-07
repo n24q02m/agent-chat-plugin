@@ -193,8 +193,19 @@ def write_cursor(chan: Path, agent: str, seq: int):
 
 
 def max_seq(chan: Path) -> int:
-    files = message_files(chan)
-    return _seq_from_name(files[-1].name) if files else 0
+    # ⚡ Bolt: Fast path for max_seq avoids sorting all files via message_files()
+    mx = 0
+    for p in chan.glob("*.md"):
+        name = p.name
+        dash_idx = name.find("-")
+        if dash_idx != -1:
+            try:
+                seq = int(name[:dash_idx])
+                if seq > mx:
+                    mx = seq
+            except ValueError:
+                pass
+    return mx
 
 
 # --- commands ----------------------------------------------------------------
@@ -227,12 +238,29 @@ def cmd_channels(root: Path, a):
             meta = json.loads(meta_path.read_text(encoding="utf-8"))
         except (OSError, ValueError):
             meta = {}
-        files = message_files(chan)
+
+        # ⚡ Bolt: single O(N) pass to find file count and latest message file
+        count = 0
+        max_seq_val = -1
+        latest_file = None
+        for p in chan.glob("*.md"):
+            name = p.name
+            dash_idx = name.find("-")
+            if dash_idx != -1:
+                try:
+                    seq = int(name[:dash_idx])
+                    count += 1
+                    if seq > max_seq_val:
+                        max_seq_val = seq
+                        latest_file = p
+                except ValueError:
+                    pass
+
         last = "-"
-        if files:
-            lm = parse_frontmatter(files[-1])
-            last = f"#{_seq_from_name(files[-1].name)} {lm.get('from','?')}: {lm.get('title','')[:40]}"
-        rows.append((chan.name, ",".join(meta.get("members", [])) or "(open)", len(files), last))
+        if latest_file:
+            lm = parse_frontmatter(latest_file)
+            last = f"#{max_seq_val} {lm.get('from','?')}: {lm.get('title','')[:40]}"
+        rows.append((chan.name, ",".join(meta.get("members", [])) or "(open)", count, last))
     if not rows:
         print(f"(no channels yet under {root})")
         return
@@ -326,13 +354,26 @@ def cmd_wait(root: Path, a):
     deadline = time.time() + a.timeout
     while True:
         found = []
-        for p in message_files(d):
-            seq = _seq_from_name(p.name)
-            if seq <= cur:
-                continue
-            meta = parse_frontmatter(p)
-            if is_relevant(meta, a.agent):
-                found.append(p)
+        # ⚡ Bolt: avoid sorting all files via message_files() on every sleep tick
+        new_candidates = []
+        for p in d.glob("*.md"):
+            name = p.name
+            dash_idx = name.find("-")
+            if dash_idx != -1:
+                try:
+                    seq = int(name[:dash_idx])
+                    if seq > cur:
+                        new_candidates.append((seq, p))
+                except ValueError:
+                    pass
+
+        if new_candidates:
+            new_candidates.sort(key=lambda x: x[0])
+            for _, p in new_candidates:
+                meta = parse_frontmatter(p)
+                if is_relevant(meta, a.agent):
+                    found.append(p)
+
         if found:
             for p in found:
                 _print_message(p)
