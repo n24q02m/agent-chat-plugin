@@ -54,6 +54,11 @@ def die(msg: str, code: int = 1):
 
 # --- channel + message primitives -------------------------------------------
 
+def _sanitize_yaml_value(value) -> str:
+    """Sanitize strings for YAML frontmatter to prevent injection."""
+    return str(value).replace("\n", " ").replace("\r", " ")
+
+
 def _check_safe_name(name: str, kind: str):
     """Prevent path traversal vulnerabilities."""
     if not name or "/" in name or "\\" in name or name in (".", ".."):
@@ -275,16 +280,16 @@ def cmd_post(root: Path, a):
         fm = [
             "---",
             f"seq: {seq}",
-            f"from: {a.sender}",
-            f"to: {to}",
+            f"from: {_sanitize_yaml_value(a.sender)}",
+            f"to: {_sanitize_yaml_value(to)}",
         ]
         if a.reply:
-            fm.append(f"reply_to: {a.reply}")
+            fm.append(f"reply_to: {_sanitize_yaml_value(a.reply)}")
         fm += [
-            f"channel: {a.channel}",
+            f"channel: {_sanitize_yaml_value(a.channel)}",
             f"ts: {now_iso()}",
-            f"status: {a.status}",
-            f"title: {a.title}",
+            f"status: {_sanitize_yaml_value(a.status)}",
+            f"title: {_sanitize_yaml_value(a.title)}",
             "---",
             "",
         ]
