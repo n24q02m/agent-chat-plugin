@@ -193,8 +193,14 @@ def write_cursor(chan: Path, agent: str, seq: int):
 
 
 def max_seq(chan: Path) -> int:
-    files = message_files(chan)
-    return _seq_from_name(files[-1].name) if files else 0
+    # ⚡ Bolt Optimization: O(N) linear scan over the directory avoids
+    # loading all files into memory and sorting them just to find the max.
+    mx = 0
+    for p in chan.glob("*.md"):
+        s = _seq_from_name(p.name)
+        if s is not None:
+            mx = max(mx, s)
+    return mx
 
 
 # --- commands ----------------------------------------------------------------
@@ -227,12 +233,26 @@ def cmd_channels(root: Path, a):
             meta = json.loads(meta_path.read_text(encoding="utf-8"))
         except (OSError, ValueError):
             meta = {}
-        files = message_files(chan)
+
+        # ⚡ Bolt Optimization: O(N) linear scan over the directory avoids
+        # loading and sorting all files in memory when we only need the count
+        # and the max seq message.
+        n = 0
+        max_s = -1
+        last_file = None
+        for p in chan.glob("*.md"):
+            s = _seq_from_name(p.name)
+            if s is not None:
+                n += 1
+                if s > max_s:
+                    max_s = s
+                    last_file = p
+
         last = "-"
-        if files:
-            lm = parse_frontmatter(files[-1])
-            last = f"#{_seq_from_name(files[-1].name)} {lm.get('from','?')}: {lm.get('title','')[:40]}"
-        rows.append((chan.name, ",".join(meta.get("members", [])) or "(open)", len(files), last))
+        if last_file:
+            lm = parse_frontmatter(last_file)
+            last = f"#{max_s} {lm.get('from','?')}: {lm.get('title','')[:40]}"
+        rows.append((chan.name, ",".join(meta.get("members", [])) or "(open)", n, last))
     if not rows:
         print(f"(no channels yet under {root})")
         return
