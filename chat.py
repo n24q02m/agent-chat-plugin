@@ -371,15 +371,17 @@ def cmd_wait(root: Path, a):
     deadline = time.time() + a.timeout
     while True:
         found = []
-        for p in message_files(d):
+        # Bolt: Use O(N) linear scan instead of sorting all files via message_files() on every poll tick
+        for p in d.glob("*.md"):
             seq = _seq_from_name(p.name)
-            if seq <= cur:
+            if seq is None or seq <= cur:
                 continue
             meta = parse_frontmatter(p)
             if is_relevant(meta, a.agent):
-                found.append(p)
+                found.append((seq, p))
         if found:
-            for p in found:
+            found.sort(key=lambda x: x[0])
+            for seq, p in found:
                 _print_message(p)
             write_cursor(d, a.agent, max_seq(d))
             return
