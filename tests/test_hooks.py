@@ -11,9 +11,12 @@ from pathlib import Path
 
 REPOSITORY_ROOT = Path(__file__).resolve().parents[1]
 PROMPT_INBOX_HOOK = REPOSITORY_ROOT / "hooks" / "prompt_inbox.py"
+STOP_INBOX_HOOK = REPOSITORY_ROOT / "hooks" / "stop_inbox.py"
 
 
 class PromptInboxHookTests(unittest.TestCase):
+    HOOK = PROMPT_INBOX_HOOK
+
     def setUp(self):
         self.temp_dir = tempfile.TemporaryDirectory()
         self.root = Path(self.temp_dir.name)
@@ -49,7 +52,7 @@ class PromptInboxHookTests(unittest.TestCase):
             env.pop(name, None)
         env.update(environment)
         return subprocess.run(
-            [sys.executable, str(PROMPT_INBOX_HOOK)],
+            [sys.executable, str(self.HOOK)],
             capture_output=True,
             check=False,
             encoding="utf-8",
@@ -128,6 +131,23 @@ class PromptInboxHookTests(unittest.TestCase):
 
         self.assertEqual(result.returncode, 0)
         self.assertEqual(result.stdout, "")
+        self.assertEqual(result.stderr, "")
+
+
+class StopInboxHookTests(PromptInboxHookTests):
+    HOOK = STOP_INBOX_HOOK
+
+    def test_warning_says_the_turn_is_ending_with_channel_and_count(self):
+        """Removing the Stop-specific warning context must fail this contract."""
+        channel = self._channel("review")
+        self._message(channel, 1, "bob", "alice")
+
+        result = self._run_hook(AGENT_CHAT_NAME="alice", AGENT_CHAT_ROOT=str(self.root))
+
+        self.assertEqual(result.returncode, 0)
+        self.assertIn("turn is ending", result.stdout)
+        self.assertIn("review", result.stdout)
+        self.assertIn("1", result.stdout)
         self.assertEqual(result.stderr, "")
 
 
