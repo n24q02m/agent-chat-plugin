@@ -138,17 +138,18 @@ class PromptInboxHookTests(unittest.TestCase):
 class StopInboxHookTests(PromptInboxHookTests):
     HOOK = STOP_INBOX_HOOK
 
-    def test_warning_says_the_turn_is_ending_with_channel_and_count(self):
-        """Removing the Stop-specific warning context must fail this contract."""
+    def test_warning_uses_claude_system_message_with_channel_and_count(self):
+        """Stop-hook warnings must use Claude's visible systemMessage field."""
         channel = self._channel("review")
         self._message(channel, 1, "bob", "alice")
 
         result = self._run_hook(AGENT_CHAT_NAME="alice", AGENT_CHAT_ROOT=str(self.root))
 
         self.assertEqual(result.returncode, 0)
-        self.assertIn("turn is ending", result.stdout)
-        self.assertIn("review", result.stdout)
-        self.assertIn("1", result.stdout)
+        payload = json.loads(result.stdout)
+        self.assertIn("turn is ending", payload["systemMessage"])
+        self.assertIn("review", payload["systemMessage"])
+        self.assertIn("1", payload["systemMessage"])
         self.assertEqual(result.stderr, "")
 
 

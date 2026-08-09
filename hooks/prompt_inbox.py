@@ -1,5 +1,6 @@
 #!/usr/bin/env python3
 """UserPromptSubmit hook: non-blockingly notify about unread peer messages."""
+
 from __future__ import annotations
 
 import os
@@ -28,7 +29,9 @@ def main() -> None:
             return
 
         unread_by_channel: list[tuple[str, int]] = []
-        for channel in _channels_to_check(root, os.environ.get("AGENT_CHAT_CHANNELS", "")):
+        for channel in _channels_to_check(
+            root, os.environ.get("AGENT_CHAT_CHANNELS", "")
+        ):
             try:
                 with redirect_stderr(StringIO()):
                     channel_path = chat.channel_dir(root, channel)
@@ -48,7 +51,9 @@ def main() -> None:
                 unread_by_channel.append((channel, unread))
 
         if unread_by_channel:
-            summary = ", ".join(f"#{channel} ({count})" for channel, count in unread_by_channel)
+            summary = ", ".join(
+                f"#{channel} ({count})" for channel, count in unread_by_channel
+            )
             print(
                 f"[agent-chat] {name} has unread peer messages: {summary}. "
                 "Run /agent-chat to read/reply."
