@@ -27,10 +27,6 @@ def _channels_to_check(root: Path, requested: str) -> list[str]:
 
 
 def main() -> None:
-    name = os.environ.get("AGENT_CHAT_NAME", "").strip()
-    if not name:
-        return
-
     # Import chat.py from the plugin root (parent of this file's hooks/ dir).
     plugin_root = str(Path(__file__).resolve().parent.parent)
     sys.path.insert(0, plugin_root)
@@ -42,6 +38,15 @@ def main() -> None:
     try:
         root = chat.root_dir(os.environ.get("AGENT_CHAT_ROOT"))
         if not root.exists():
+            return
+
+        name = os.environ.get("AGENT_CHAT_NAME", "").strip()
+        if not name:
+            if any(root.glob("*/_meta.json")):
+                print(
+                    "[agent-chat] Inbox hook disabled: identity is unset; "
+                    "set AGENT_CHAT_NAME."
+                )
             return
 
         unread_by_channel: list[tuple[str, int]] = []

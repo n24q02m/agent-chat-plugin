@@ -12,6 +12,7 @@ from pathlib import Path
 REPOSITORY_ROOT = Path(__file__).resolve().parents[1]
 PROMPT_INBOX_HOOK = REPOSITORY_ROOT / "hooks" / "prompt_inbox.py"
 STOP_INBOX_HOOK = REPOSITORY_ROOT / "hooks" / "stop_inbox.py"
+SESSION_INBOX_HOOK = REPOSITORY_ROOT / "hooks" / "session_inbox.py"
 
 
 class PromptInboxHookTests(unittest.TestCase):
@@ -148,6 +149,86 @@ class StopInboxHookTests(PromptInboxHookTests):
         self.assertIn("turn is ending", result.stdout)
         self.assertIn("review", result.stdout)
         self.assertIn("1", result.stdout)
+        self.assertEqual(result.stderr, "")
+
+
+class SessionInboxHookTests(unittest.TestCase):
+    def setUp(self):
+        self.temp_dir = tempfile.TemporaryDirectory()
+        self.root = Path(self.temp_dir.name)
+
+    def tearDown(self):
+        self.temp_dir.cleanup()
+
+    def _channel(self, name="general"):
+        channel = self.root / name
+        channel.mkdir()
+        (channel / "_meta.json").write_text(
+            json.dumps({"channel": name, "members": [], "topic": ""}),
+            encoding="utf-8",
+        )
+        return channel
+
+    def _message(self, channel, sequence, sender, recipient="all"):
+        (channel / f"{sequence:04d}-{sender}-message.md").write_text(
+            "---\n"
+            f"seq: {sequence}\n"
+            f"from: {sender}\n"
+            f"to: {recipient}\n"
+            f"channel: {channel.name}\n"
+            "title: Message\n"
+            "---\n"
+            "body\n",
+            encoding="utf-8",
+        )
+
+    def _run_hook(self, **environment):
+        env = os.environ.copy()
+        for name in ("AGENT_CHAT_NAME", "AGENT_CHAT_ROOT", "AGENT_CHAT_CHANNELS"):
+            env.pop(name, None)
+        env.update(environment)
+        return subprocess.run(
+            [sys.executable, str(SESSION_INBOX_HOOK)],
+            capture_output=True,
+            check=False,
+            encoding="utf-8",
+            env=env,
+        )
+
+    def test_explains_missing_identity_when_a_chat_channel_exists(self):
+        """Returning before root discovery must not hide an unset identity."""
+        self._channel()
+
+        result = self._run_hook(AGENT_CHAT_ROOT=str(self.root))
+
+        self.assertEqual(result.returncode, 0)
+        self.assertEqual(
+            result.stdout,
+            "[agent-chat] Inbox hook disabled: identity is unset; set AGENT_CHAT_NAME.\n",
+        )
+        self.assertEqual(result.stderr, "")
+
+    def test_stays_quiet_without_an_identity_when_the_chat_root_is_missing(self):
+        """An unconfigured chat installation must not produce an identity warning."""
+        result = self._run_hook(AGENT_CHAT_ROOT=str(self.root / "missing"))
+
+        self.assertEqual(result.returncode, 0)
+        self.assertEqual(result.stdout, "")
+        self.assertEqual(result.stderr, "")
+
+    def test_keeps_configured_identity_inbox_notifications(self):
+        """Identity diagnostics must not replace existing unread-message summaries."""
+        channel = self._channel("review")
+        self._message(channel, 1, "bob", "alice")
+
+        result = self._run_hook(AGENT_CHAT_NAME="alice", AGENT_CHAT_ROOT=str(self.root))
+
+        self.assertEqual(result.returncode, 0)
+        self.assertEqual(
+            result.stdout,
+            "[agent-chat] alice has unread peer messages: #review (1). "
+            "Run /agent-chat to read/reply.\n",
+        )
         self.assertEqual(result.stderr, "")
 
 
