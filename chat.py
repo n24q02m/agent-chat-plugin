@@ -47,6 +47,11 @@ def slugify(text: str, maxlen: int = 40) -> str:
     return (s[:maxlen].rstrip("-")) or "msg"
 
 
+def _frontmatter_value(value) -> str:
+    """Keep a dynamic frontmatter value on exactly one physical line."""
+    return re.sub(r"[\r\n]+", " ", str(value))
+
+
 def die(msg: str, code: int = 1):
     print(f"agent-chat: {msg}", file=sys.stderr)
     raise SystemExit(code)
@@ -193,8 +198,12 @@ def write_cursor(chan: Path, agent: str, seq: int):
 
 
 def max_seq(chan: Path) -> int:
-    files = message_files(chan)
-    return _seq_from_name(files[-1].name) if files else 0
+    maximum = 0
+    for path in chan.glob("*.md"):
+        seq = _seq_from_name(path.name)
+        if seq is not None and seq > maximum:
+            maximum = seq
+    return maximum
 
 
 # --- commands ----------------------------------------------------------------
@@ -227,12 +236,22 @@ def cmd_channels(root: Path, a):
             meta = json.loads(meta_path.read_text(encoding="utf-8"))
         except (OSError, ValueError):
             meta = {}
-        files = message_files(chan)
+        count = 0
+        last_path = None
+        last_seq = 0
+        for path in chan.glob("*.md"):
+            seq = _seq_from_name(path.name)
+            if seq is None:
+                continue
+            count += 1
+            if last_path is None or seq > last_seq:
+                last_path = path
+                last_seq = seq
         last = "-"
-        if files:
-            lm = parse_frontmatter(files[-1])
-            last = f"#{_seq_from_name(files[-1].name)} {lm.get('from','?')}: {lm.get('title','')[:40]}"
-        rows.append((chan.name, ",".join(meta.get("members", [])) or "(open)", len(files), last))
+        if last_path is not None:
+            lm = parse_frontmatter(last_path)
+            last = f"#{last_seq} {lm.get('from','?')}: {lm.get('title','')[:40]}"
+        rows.append((chan.name, ",".join(meta.get("members", [])) or "(open)", count, last))
     if not rows:
         print(f"(no channels yet under {root})")
         return
@@ -258,6 +277,8 @@ def _read_body(a) -> str:
     if a.body_file:
         return Path(a.body_file).read_text(encoding="utf-8")
     # Default: read from stdin so agents can pipe long markdown bodies.
+    if sys.stdin.isatty():
+        print("agent-chat: Enter message body; send EOF when finished.", file=sys.stderr)
     data = sys.stdin.read()
     if not data.strip():
         die("empty body (pass --body, --body-file, or pipe via stdin)")
@@ -267,7 +288,13 @@ def _read_body(a) -> str:
 def cmd_post(root: Path, a):
     d = require_channel(root, a.channel)
     body = _read_body(a)
-    to = a.to or "all"
+    sender = _frontmatter_value(a.sender)
+    to = _frontmatter_value(a.to or "all")
+    reply = _frontmatter_value(a.reply) if a.reply else None
+    channel = _frontmatter_value(a.channel)
+    timestamp = _frontmatter_value(now_iso())
+    status = _frontmatter_value(a.status)
+    title = _frontmatter_value(a.title)
     lock = _acquire_lock(d)
     try:
         seq = _next_seq(d)
@@ -275,16 +302,16 @@ def cmd_post(root: Path, a):
         fm = [
             "---",
             f"seq: {seq}",
-            f"from: {a.sender}",
+            f"from: {sender}",
             f"to: {to}",
         ]
-        if a.reply:
-            fm.append(f"reply_to: {a.reply}")
+        if reply is not None:
+            fm.append(f"reply_to: {reply}")
         fm += [
-            f"channel: {a.channel}",
-            f"ts: {now_iso()}",
-            f"status: {a.status}",
-            f"title: {a.title}",
+            f"channel: {channel}",
+            f"ts: {timestamp}",
+            f"status: {status}",
+            f"title: {title}",
             "---",
             "",
         ]
