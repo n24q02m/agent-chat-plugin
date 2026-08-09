@@ -70,12 +70,19 @@ class ChatRegressionTests(unittest.TestCase):
     def test_max_seq_uses_highest_valid_sequence_with_gaps_and_malformed_files(self):
         """Only numbered message filenames affect the maximum sequence."""
         channel = self._channel("general")
-        for name in ("0002-alice-first.md", "0010-bob-last.md", "broken.md", "12x-nope.md"):
+        for name in (
+            "0002-alice-first.md",
+            "0010-bob-last.md",
+            "broken.md",
+            "12x-nope.md",
+        ):
             (channel / name).write_text("body", encoding="utf-8")
 
         self.assertEqual(chat.max_seq(channel), 10)
 
-    def test_channels_reports_counts_and_last_message_for_empty_and_gapped_channels(self):
+    def test_channels_reports_counts_and_last_message_for_empty_and_gapped_channels(
+        self,
+    ):
         """Channel summaries count valid messages and select the highest sequence."""
         alpha = self._channel("alpha")
         self._channel("beta")
@@ -103,16 +110,22 @@ class ChatRegressionTests(unittest.TestCase):
         channel = self._channel("general")
         tty_stderr = io.StringIO()
         with patch.object(chat.sys, "stdin", _FakeStdin("typed body", True)):
-            with contextlib.redirect_stdout(io.StringIO()), contextlib.redirect_stderr(tty_stderr):
+            with contextlib.redirect_stdout(io.StringIO()), contextlib.redirect_stderr(
+                tty_stderr
+            ):
                 chat.cmd_post(self.root, self._post_args(body=None))
         self.assertIn("Enter message body", tty_stderr.getvalue())
 
         pipe_stderr = io.StringIO()
         with patch.object(chat.sys, "stdin", _FakeStdin("piped body", False)):
-            with contextlib.redirect_stdout(io.StringIO()), contextlib.redirect_stderr(pipe_stderr):
+            with contextlib.redirect_stdout(io.StringIO()), contextlib.redirect_stderr(
+                pipe_stderr
+            ):
                 chat.cmd_post(self.root, self._post_args(body=None, title="Piped"))
         self.assertEqual(pipe_stderr.getvalue(), "")
-        self.assertIn("piped body", (channel / "0002-alice-piped.md").read_text(encoding="utf-8"))
+        self.assertIn(
+            "piped body", (channel / "0002-alice-piped.md").read_text(encoding="utf-8")
+        )
 
 
 if __name__ == "__main__":
