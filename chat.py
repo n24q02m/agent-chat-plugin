@@ -56,6 +56,10 @@ def _frontmatter_value(value) -> str:
     return re.sub(r"[\r\n]+", " ", str(value))
 
 
+class AgentChatError(Exception):
+    pass
+
+
 def die(msg: str, code: int = 1):
     print(f"agent-chat: {msg}", file=sys.stderr)
     raise SystemExit(code)
@@ -66,8 +70,8 @@ def die(msg: str, code: int = 1):
 
 def _check_safe_name(name: str, kind: str):
     """Prevent path traversal vulnerabilities."""
-    if not name or "/" in name or "\\" in name or name in (".", ".."):
-        die(f"invalid {kind} name (path traversal blocked): '{name}'")
+    if not name or "/" in name or "\\" in name or ":" in name or name in (".", ".."):
+        raise AgentChatError(f"invalid {kind} name (path traversal blocked): '{name}'")
 
 
 def channel_dir(root: Path, channel: str) -> Path:
@@ -78,7 +82,7 @@ def channel_dir(root: Path, channel: str) -> Path:
 def require_channel(root: Path, channel: str) -> Path:
     d = channel_dir(root, channel)
     if not (d / "_meta.json").exists():
-        die(f"channel '{channel}' not found under {root} (run: init {channel})")
+        raise AgentChatError(f"channel '{channel}' not found under {root} (run: init {channel})")
     return d
 
 
@@ -163,7 +167,7 @@ def _acquire_lock(chan: Path, timeout: float = 10.0, stale: float = 30.0) -> Pat
             except FileNotFoundError:
                 continue
             if time.time() - start > timeout:
-                die("could not acquire channel seq lock (another poster is stuck?)")
+                raise AgentChatError("could not acquire channel seq lock (another poster is stuck?)")
             time.sleep(0.05)
 
 
@@ -222,7 +226,7 @@ def cmd_init(root: Path, a):
     (d / ".cursors").mkdir(exist_ok=True)
     meta_path = d / "_meta.json"
     if meta_path.exists():
-        die(f"channel '{a.channel}' already exists")
+        raise AgentChatError(f"channel '{a.channel}' already exists")
     members = [m.strip() for m in (a.members or "").split(",") if m.strip()]
     meta_path.write_text(
         json.dumps(
@@ -299,7 +303,7 @@ def _read_body(a) -> str:
         )
     data = sys.stdin.read()
     if not data.strip():
-        die("empty body (pass --body, --body-file, or pipe via stdin)")
+        raise AgentChatError("empty body (pass --body, --body-file, or pipe via stdin)")
     return data
 
 
@@ -491,7 +495,10 @@ def build_parser() -> argparse.ArgumentParser:
 def main(argv=None):
     args = build_parser().parse_args(argv)
     root = root_dir(args.root)
-    args.func(root, args)
+    try:
+        args.func(root, args)
+    except AgentChatError as e:
+        die(str(e))
 
 
 if __name__ == "__main__":
