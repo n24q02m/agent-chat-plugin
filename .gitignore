@@ -4,3 +4,4 @@ dist/
 build/
 *.egg-info/
 .worktrees/
+mock_chat_root/
