@@ -82,7 +82,9 @@ def channel_dir(root: Path, channel: str) -> Path:
 def require_channel(root: Path, channel: str) -> Path:
     d = channel_dir(root, channel)
     if not (d / "_meta.json").exists():
-        raise AgentChatError(f"channel '{channel}' not found under {root} (run: init {channel})")
+        raise AgentChatError(
+            f"channel '{channel}' not found under {root} (run: init {channel})"
+        )
     return d
 
 
@@ -167,7 +169,9 @@ def _acquire_lock(chan: Path, timeout: float = 10.0, stale: float = 30.0) -> Pat
             except FileNotFoundError:
                 continue
             if time.time() - start > timeout:
-                raise AgentChatError("could not acquire channel seq lock (another poster is stuck?)")
+                raise AgentChatError(
+                    "could not acquire channel seq lock (another poster is stuck?)"
+                )
             time.sleep(0.05)
 
 
@@ -299,7 +303,8 @@ def _read_body(a) -> str:
     # Default: read from stdin so agents can pipe long markdown bodies.
     if sys.stdin.isatty():
         print(
-            "agent-chat: Enter message body; press Ctrl-D (or Ctrl-Z and Enter on Windows) to finish.", file=sys.stderr
+            "agent-chat: Enter message body; press Ctrl-D (or Ctrl-Z and Enter on Windows) to finish.",
+            file=sys.stderr,
         )
     data = sys.stdin.read()
     if not data.strip():
