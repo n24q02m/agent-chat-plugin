@@ -52,11 +52,23 @@ zero model tokens.**
 
 ## Why this exists
 
-Every strong multi-agent coding tool today is either **hierarchical** (a supervisor or
-human drives subagents) or **single-agent**. The peer case — N equal sessions
-coordinating through a folder of messages, autonomously waiting on each other — has no
-lean, cross-platform, tool-agnostic answer. This is that answer. (Honest scope: this is
-a young space; see `COMPARISON.md` for exactly what already exists and where this differs.)
+Claude Code now has a native **cross-session messaging** path for Claude Code sessions
+on supported platforms. The peer case this project targets is broader: N equal sessions
+across Claude Code, Codex, Cursor, OpenCode, or mixed tools coordinating through a
+file-backed, auditable folder of messages and autonomously waiting on each other. This
+is that cross-tool answer. (Honest scope: this is a young space; see `COMPARISON.md` for
+the native Claude Code overlap and the exact differences.)
+
+### Claude Code native overlap
+
+Claude Code `v2.1.224+` provides **Cross-session messaging** through `ListAgents` and
+`SendMessage` on macOS/Linux, including WSL2; native Windows is not currently supported.
+That feature is Claude-Code-only and delivers messages directly between sessions. This
+project remains distinct through mixed-tool coordination, native Windows support,
+Markdown channels that are git-committable and replayable, atomic claims/cursors, and
+zero-token in-process waiting. On supported Claude Code platforms, the native path may
+make this plugin's optional unread-notification hooks redundant; it does not replace the
+file-backed protocol.
 
 ## Quickstart
 

@@ -1,7 +1,9 @@
 # agent-chat vs prior art (honest comparison)
 
 Verified 2026-07-17 against each project's primary sources (repo files / arXiv). Star
-counts and maturity drift; this is a mid-2026 snapshot of a young space.
+counts and maturity drift; this is a mid-2026 snapshot of a young space. Claude Code's
+native cross-session messaging was verified against its official documentation and
+v2.1.224 release notes on 2026-08-11.
 
 ## Where each one sits
 
@@ -39,11 +41,29 @@ counts and maturity drift; this is a mid-2026 snapshot of a young space.
 - `SKILL.md` cross-tool distribution -> the path planning-with-files proved.
 - Optional human governance bands -> the model Turnfile formalizes (here opt-in).
 
+## Claude Code native cross-session messaging
+
+Claude Code `v2.1.224+` adds **Cross-session messaging**, using `ListAgents` for discovery
+and `SendMessage` for direct text delivery between Claude Code sessions. It is a real
+overlap in peer-session messaging, but it is not the same product surface:
+
+| Dimension | agent-chat | Claude Code native |
+|---|---|---|
+| Scope | Claude Code, Codex, Cursor, OpenCode; mixed tools | Claude Code sessions only |
+| Transport | Markdown files in shared folders and channels | Native session messaging |
+| Platform | Windows, WSL, Linux | macOS/Linux/WSL2; not native Windows |
+| Workflow | Cursors, atomic claims, replayable audit trail, zero-token `wait` | Direct session delivery; no file-backed protocol |
+
+The native feature makes the Claude-specific unread-notification hook layer partially
+redundant on supported platforms. It does not subsume this repository's cross-tool,
+Windows, file/audit, multi-channel, claim/cursor, or zero-token-wait scope.
+
 ## The unsolved combination agent-chat targets
 
 **Peer (no required arbiter) + a folder of messages across multiple channels +
-autonomous cross-platform token-free wait.** No verified prior-art project delivers all
-three together. The riskiest unproven primitive across the whole space is a
+autonomous cross-platform token-free wait.** No verified prior-art project, including
+Claude Code's native path, delivers all three together. The riskiest unproven primitive
+across the whole space is a
 battle-tested Windows-compatible wait-without-token-burn — agent-chat's sleep-poll is
 the conservative, working baseline.
 
