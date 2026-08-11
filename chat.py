@@ -299,7 +299,7 @@ def _read_body(a) -> str:
     # Default: read from stdin so agents can pipe long markdown bodies.
     if sys.stdin.isatty():
         print(
-            "agent-chat: Enter message body; send EOF when finished.", file=sys.stderr
+            "agent-chat: Enter message body; press Ctrl-D (or Ctrl-Z and Enter on Windows) to finish.", file=sys.stderr
         )
     data = sys.stdin.read()
     if not data.strip():
