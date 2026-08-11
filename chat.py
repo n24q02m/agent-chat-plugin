@@ -421,6 +421,8 @@ def cmd_claim(root: Path, a):
     won the race -- exit non-zero so the caller moves on.
     """
     _check_safe_name(a.task, "task")
+    if a.task.startswith((".", "_")):
+        raise AgentChatError(f"invalid task name (system files blocked): '{a.task}'")
     d = require_channel(root, a.channel)
     src = d / a.task
     dst = d / (Path(a.task).stem + f".CLAIMED-{slugify(a.agent)}.md")
