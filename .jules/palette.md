@@ -9,3 +9,6 @@
 ## 2024-08-11 - CLI Stdin EOF Prompt
 **Learning:** When prompting for input via stdin in a CLI application, instructing the user to "send EOF" is too technical and can lead to confusion. Platform-specific instructions are needed.
 **Action:** When reading from stdin and using `sys.stdin.isatty()` to provide a prompt, include platform-specific instructions on how to send EOF (e.g., "press Ctrl-D (or Ctrl-Z and Enter on Windows) to finish").
+## 2026-08-11 - Use ellipses for text truncation in CLI listings
+**Learning:** When text is truncated with a hard slice (`[:40]`), users may assume it is a formatting error or that the text ends abruptly.
+**Action:** Use an ellipsis (`...`) instead to clearly signal to the user that text was shortened to fit constraints.
