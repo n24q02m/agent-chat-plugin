@@ -9,3 +9,7 @@
 ## 2024-08-10 - O(N log N) bottlenecks in polling loops
 **Learning:** Polling and counting operations like `cmd_wait` and `session_inbox.py` were calling `message_files(chan)` which globs and then sorts *all* `.md` files on every iteration. On large channels, this O(N log N) operation caused measurable CPU overhead per tick just to filter out messages older than the cursor.
 **Action:** When polling or counting messages, use a plain O(N) `chan.glob("*.md")` scan to filter out unread messages first, and only sort the resulting tiny subset (the unread messages) when necessary.
+
+## 2024-08-11 - Single pass optimization for max and filter
+**Learning:** Functions that need to both filter a set of files (e.g., getting unread messages) and find a global property (e.g., maximum sequence number) can suffer from redundant O(N) operations if done sequentially with tools like `max_seq`.
+**Action:** When filtering messages and tracking a global property like `top`, do it in a single O(N) pass using `glob` to avoid multiple directory scans.
