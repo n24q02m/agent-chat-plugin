@@ -292,8 +292,7 @@ def cmd_roster(root: Path, a):
     print(f"channel : {meta.get('channel')}")
     print(f"topic   : {meta.get('topic') or '(none)'}")
     print(f"members : {', '.join(meta.get('members', [])) or '(open)'}")
-    count = len(message_files(d))
-    print(f"messages: {count}")
+    print(f"messages: {len(message_files(d))}")
 
 
 def _read_body(a) -> str:
