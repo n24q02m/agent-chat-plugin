@@ -275,7 +275,10 @@ def cmd_channels(root: Path, a):
         last = "-"
         if last_path is not None:
             lm = parse_frontmatter(last_path)
-            last = f"#{last_seq} {lm.get('from', '?')}: {lm.get('title', '')[:40]}"
+            title = lm.get("title", "")
+            if len(title) > 40:
+                title = title[:37] + "..."
+            last = f"#{last_seq} {lm.get('from', '?')}: {title}"
         rows.append(
             (chan.name, ",".join(meta.get("members", [])) or "(open)", count, last)
         )
