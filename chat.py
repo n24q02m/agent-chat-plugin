@@ -429,6 +429,9 @@ def cmd_wait(root: Path, a):
 def cmd_peek(root: Path, a):
     d = require_channel(root, a.channel)
 
+    if a.n <= 0:
+        return
+
     # Optimization: Use a min-heap to find top N messages in O(N log K) time
     # rather than sorting all messages O(N log N) via message_files()
     top_n = []
