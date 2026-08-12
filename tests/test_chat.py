@@ -159,6 +159,23 @@ class ChatRegressionTests(unittest.TestCase):
         self.assertLess(rendered.index("title: First"), rendered.index("title: Second"))
         self.assertEqual((channel / ".cursors" / "alice.txt").read_text(), "2")
 
+    def test_peek_zero_messages_is_empty(self):
+        """A zero-size peek must not index an empty heap."""
+        channel = self._channel("general")
+        (channel / "0001-bob-message.md").write_text(
+            "---\nseq: 1\nfrom: bob\ntitle: Message\n---\nbody\n",
+            encoding="utf-8",
+        )
+
+        output = io.StringIO()
+        with contextlib.redirect_stdout(output):
+            chat.cmd_peek(
+                self.root,
+                SimpleNamespace(channel="general", n=0),
+            )
+
+        self.assertEqual(output.getvalue(), "")
+
     def test_claim_rejects_internal_channel_files(self):
         """Claim must not rename channel metadata or cursor files."""
         channel = self._channel("general")

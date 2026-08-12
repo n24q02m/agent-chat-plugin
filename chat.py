@@ -30,6 +30,8 @@ import sys
 import time
 from pathlib import Path
 
+import heapq
+
 # --- root + small helpers ----------------------------------------------------
 
 
@@ -298,7 +300,8 @@ def cmd_roster(root: Path, a):
     print(f"channel : {meta.get('channel')}")
     print(f"topic   : {meta.get('topic') or '(none)'}")
     print(f"members : {', '.join(meta.get('members', [])) or '(open)'}")
-    print(f"messages: {len(message_files(d))}")
+    count = sum(1 for p in d.glob("*.md") if _seq_from_name(p.name) is not None)
+    print(f"messages: {count}")
 
 
 def _read_body(a) -> str:
@@ -425,7 +428,24 @@ def cmd_wait(root: Path, a):
 
 def cmd_peek(root: Path, a):
     d = require_channel(root, a.channel)
-    files = message_files(d)[-a.n :]
+
+    if a.n <= 0:
+        return
+
+    # Optimization: Use a min-heap to find top N messages in O(N log K) time
+    # rather than sorting all messages O(N log N) via message_files()
+    top_n = []
+    for p in d.glob("*.md"):
+        seq = _seq_from_name(p.name)
+        if seq is not None:
+            if len(top_n) < a.n:
+                heapq.heappush(top_n, (seq, p))
+            elif seq > top_n[0][0]:
+                heapq.heapreplace(top_n, (seq, p))
+
+    # Extract in ascending order (heappop gets the smallest first)
+    files = [heapq.heappop(top_n)[1] for _ in range(len(top_n))]
+
     for p in files:
         _print_message(p)
     if not files:
