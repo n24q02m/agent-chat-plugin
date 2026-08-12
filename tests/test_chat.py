@@ -105,6 +105,31 @@ class ChatRegressionTests(unittest.TestCase):
         self.assertIn("beta", rendered)
         self.assertIn("last: -", rendered)
 
+    def test_read_preserves_sequence_order_and_advances_cursor(self):
+        """Unread messages are rendered in sequence order and advance the cursor."""
+        channel = self._channel("general")
+        (channel / "0002-bob-second.md").write_text(
+            "---\nseq: 2\nfrom: bob\nto: alice\ntitle: Second\n---\nbody\n",
+            encoding="utf-8",
+        )
+        (channel / "0001-bob-first.md").write_text(
+            "---\nseq: 1\nfrom: bob\nto: alice\ntitle: First\n---\nbody\n",
+            encoding="utf-8",
+        )
+
+        output = io.StringIO()
+        with contextlib.redirect_stdout(output):
+            chat.cmd_read(
+                self.root,
+                SimpleNamespace(
+                    channel="general", agent="alice", all=False, peek=False
+                ),
+            )
+
+        rendered = output.getvalue()
+        self.assertLess(rendered.index("title: First"), rendered.index("title: Second"))
+        self.assertEqual((channel / ".cursors" / "alice.txt").read_text(), "2")
+
     def test_post_prompts_for_tty_stdin_but_not_piped_stdin(self):
         """Interactive body entry gets guidance; a pipeline stays quiet."""
         channel = self._channel("general")

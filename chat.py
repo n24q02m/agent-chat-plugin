@@ -292,8 +292,7 @@ def cmd_roster(root: Path, a):
     print(f"channel : {meta.get('channel')}")
     print(f"topic   : {meta.get('topic') or '(none)'}")
     print(f"members : {', '.join(meta.get('members', [])) or '(open)'}")
-    # Optimization: use O(N) glob scan instead of O(N log N) message_files sort
-    count = sum(1 for p in d.glob("*.md") if _seq_from_name(p.name) is not None)
+    count = len(message_files(d))
     print(f"messages: {count}")
 
 
