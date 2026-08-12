@@ -134,6 +134,16 @@ class ChatRegressionTests(unittest.TestCase):
 
         self.assertIn(f"last: #1 bob: {title}", output.getvalue())
 
+    def test_init_rejects_reserved_channel_prefixes(self):
+        """User channels cannot collide with dotfiles or internal directories."""
+        for channel in ("_internal", ".hidden"):
+            with self.subTest(channel=channel), self.assertRaises(chat.AgentChatError):
+                chat.cmd_init(
+                    self.root,
+                    SimpleNamespace(channel=channel, members=None, topic=None),
+                )
+            self.assertFalse((self.root / channel).exists())
+
     def test_read_preserves_sequence_order_and_advances_cursor(self):
         """Unread messages are rendered in sequence order and advance the cursor."""
         channel = self._channel("general")
