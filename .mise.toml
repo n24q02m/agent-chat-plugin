@@ -5,7 +5,7 @@
 # tool is ruff; there is nothing to build or install.
 
 [tools]
-python = "3.14.6"
+python = "3.14.7"
 # Same version as CI and .pre-commit-config.yaml. "latest" silently changes the
 # rule set under you: ruff 0.16.0 widened the defaults and turned main red.
 ruff = "0.15.7"
