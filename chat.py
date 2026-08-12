@@ -72,6 +72,8 @@ def _check_safe_name(name: str, kind: str):
     """Prevent path traversal vulnerabilities."""
     if not name or "/" in name or "\\" in name or ":" in name or name in (".", ".."):
         raise AgentChatError(f"invalid {kind} name (path traversal blocked): '{name}'")
+    if name.startswith(".") or name.startswith("_"):
+        raise AgentChatError(f"invalid {kind} name (reserved prefix blocked): '{name}'")
 
 
 _TASK_MARKER_RE = re.compile(r"task-[A-Za-z0-9][A-Za-z0-9_-]*\.md")
