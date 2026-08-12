@@ -74,6 +74,9 @@ def _check_safe_name(name: str, kind: str):
         raise AgentChatError(f"invalid {kind} name (path traversal blocked): '{name}'")
 
 
+_TASK_MARKER_RE = re.compile(r"task-[A-Za-z0-9][A-Za-z0-9_-]*\.md")
+
+
 def channel_dir(root: Path, channel: str) -> Path:
     _check_safe_name(channel, "channel")
     return root / channel
@@ -421,13 +424,25 @@ def cmd_claim(root: Path, a):
     won the race -- exit non-zero so the caller moves on.
     """
     _check_safe_name(a.task, "task")
+    if not _TASK_MARKER_RE.fullmatch(a.task):
+        raise AgentChatError(
+            f"invalid task name (expected task-<id>.md marker): '{a.task}'"
+        )
     d = require_channel(root, a.channel)
     src = d / a.task
     dst = d / (Path(a.task).stem + f".CLAIMED-{slugify(a.agent)}.md")
+    lock = _acquire_lock(d)
     try:
-        os.replace(src, dst)  # atomic on Windows + POSIX when same directory
-    except FileNotFoundError:
-        die(f"task '{a.task}' already claimed or missing (lost the race)", code=3)
+        if dst.exists():
+            die(f"task '{a.task}' already claimed or missing (lost the race)", code=3)
+        if not src.is_file():
+            die(f"task '{a.task}' already claimed or missing (lost the race)", code=3)
+        try:
+            os.replace(src, dst)  # atomic on Windows + POSIX within the claim lock
+        except FileNotFoundError:
+            die(f"task '{a.task}' already claimed or missing (lost the race)", code=3)
+    finally:
+        _release_lock(lock)
     print(f"claimed {a.task} -> {dst.name}")
 
 
