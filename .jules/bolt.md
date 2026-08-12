@@ -9,3 +9,7 @@
 ## 2024-08-10 - O(N log N) bottlenecks in polling loops
 **Learning:** Polling and counting operations like `cmd_wait` and `session_inbox.py` were calling `message_files(chan)` which globs and then sorts *all* `.md` files on every iteration. On large channels, this O(N log N) operation caused measurable CPU overhead per tick just to filter out messages older than the cursor.
 **Action:** When polling or counting messages, use a plain O(N) `chan.glob("*.md")` scan to filter out unread messages first, and only sort the resulting tiny subset (the unread messages) when necessary.
+
+## 2024-11-20 - Finding top N messages without full sort
+**Learning:** `cmd_peek` was using `message_files(d)[-a.n:]`, which globs and fully sorts all files just to slice the top `N`. For channels with thousands of messages, this full O(N log N) sort is inefficient.
+**Action:** When finding the top `N` highest sequence numbers from a large set of messages, use an O(N log K) min-heap approach (e.g., via `heapq`) rather than fully sorting all items. This same principle of replacing `message_files(d)` with an O(N) glob applies to simple counting scenarios like `cmd_roster`.
