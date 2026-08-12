@@ -361,16 +361,29 @@ def cmd_read(root: Path, a):
     d = require_channel(root, a.channel)
     cur = 0 if a.all else read_cursor(d, a.agent)
     shown = 0
-    for p in message_files(d):
+
+    # Optimization: One O(N) glob scan to find both top seq and unread messages,
+    # avoiding O(N log N) message_files sort and redundant max_seq glob.
+    found = []
+    top = 0
+    for p in d.glob("*.md"):
         seq = _seq_from_name(p.name)
-        if seq <= cur:
+        if seq is None:
             continue
+        if seq > top:
+            top = seq
+        if seq > cur:
+            found.append((seq, p))
+
+    found.sort(key=lambda x: x[0])
+
+    for seq, p in found:
         meta = parse_frontmatter(p)
         if not a.all and not is_relevant(meta, a.agent):
             continue
         _print_message(p)
         shown += 1
-    top = max_seq(d)
+
     if not a.peek:
         write_cursor(d, a.agent, top)
     if shown == 0:
