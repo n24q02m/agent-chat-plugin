@@ -119,6 +119,21 @@ class ChatRegressionTests(unittest.TestCase):
 
         self.assertIn("last: #1 bob: " + ("A" * 37) + "...", output.getvalue())
 
+    def test_channels_keeps_titles_at_the_display_limit(self):
+        """Titles at the 40-character limit are not shortened."""
+        channel = self._channel("general")
+        title = "B" * 40
+        (channel / "0001-bob-boundary.md").write_text(
+            f"---\nseq: 1\nfrom: bob\ntitle: {title}\n---\nbody\n",
+            encoding="utf-8",
+        )
+
+        output = io.StringIO()
+        with contextlib.redirect_stdout(output):
+            chat.cmd_channels(self.root, SimpleNamespace())
+
+        self.assertIn(f"last: #1 bob: {title}", output.getvalue())
+
     def test_post_prompts_for_tty_stdin_but_not_piped_stdin(self):
         """Interactive body entry gets guidance; a pipeline stays quiet."""
         channel = self._channel("general")
