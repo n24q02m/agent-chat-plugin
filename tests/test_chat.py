@@ -134,6 +134,90 @@ class ChatRegressionTests(unittest.TestCase):
 
         self.assertIn(f"last: #1 bob: {title}", output.getvalue())
 
+    def test_read_preserves_sequence_order_and_advances_cursor(self):
+        """Unread messages are rendered in sequence order and advance the cursor."""
+        channel = self._channel("general")
+        (channel / "0002-bob-second.md").write_text(
+            "---\nseq: 2\nfrom: bob\nto: alice\ntitle: Second\n---\nbody\n",
+            encoding="utf-8",
+        )
+        (channel / "0001-bob-first.md").write_text(
+            "---\nseq: 1\nfrom: bob\nto: alice\ntitle: First\n---\nbody\n",
+            encoding="utf-8",
+        )
+
+        output = io.StringIO()
+        with contextlib.redirect_stdout(output):
+            chat.cmd_read(
+                self.root,
+                SimpleNamespace(
+                    channel="general", agent="alice", all=False, peek=False
+                ),
+            )
+
+        rendered = output.getvalue()
+        self.assertLess(rendered.index("title: First"), rendered.index("title: Second"))
+        self.assertEqual((channel / ".cursors" / "alice.txt").read_text(), "2")
+
+    def test_claim_rejects_internal_channel_files(self):
+        """Claim must not rename channel metadata or cursor files."""
+        channel = self._channel("general")
+        args = SimpleNamespace(channel="general", task="_meta.json", agent="mallory")
+
+        with self.assertRaises(chat.AgentChatError):
+            chat.cmd_claim(self.root, args)
+
+        self.assertTrue((channel / "_meta.json").exists())
+
+    def test_claim_rejects_non_task_files(self):
+        """Claim accepts only the documented task marker filename shape."""
+        channel = self._channel("general")
+        for name in ("README.md", "0001-bob-message.md", "task-.md"):
+            path = channel / name
+            path.write_text("original", encoding="utf-8")
+            with self.subTest(name=name), self.assertRaises(chat.AgentChatError):
+                chat.cmd_claim(
+                    self.root,
+                    SimpleNamespace(channel="general", task=name, agent="mallory"),
+                )
+            self.assertTrue(path.exists())
+            self.assertEqual(path.read_text(encoding="utf-8"), "original")
+
+    def test_claim_renames_task_marker_without_overwriting_existing_claim(self):
+        """A destination collision is a lost claim, never an overwrite."""
+        channel = self._channel("general")
+        source = channel / "task-12.md"
+        claimed = channel / "task-12.CLAIMED-mallory.md"
+        source.write_text("task", encoding="utf-8")
+        claimed.write_text("other agent", encoding="utf-8")
+
+        with self.assertRaises(SystemExit) as raised:
+            chat.cmd_claim(
+                self.root,
+                SimpleNamespace(channel="general", task=source.name, agent="mallory"),
+            )
+
+        self.assertEqual(raised.exception.code, 3)
+        self.assertEqual(source.read_text(encoding="utf-8"), "task")
+        self.assertEqual(claimed.read_text(encoding="utf-8"), "other agent")
+
+    def test_claim_renames_valid_task_marker(self):
+        """A valid marker is renamed to the agent-specific claimed name."""
+        channel = self._channel("general")
+        source = channel / "task-12.md"
+        source.write_text("task", encoding="utf-8")
+
+        chat.cmd_claim(
+            self.root,
+            SimpleNamespace(channel="general", task=source.name, agent="alice"),
+        )
+
+        self.assertFalse(source.exists())
+        self.assertEqual(
+            (channel / "task-12.CLAIMED-alice.md").read_text(encoding="utf-8"),
+            "task",
+        )
+
     def test_post_prompts_for_tty_stdin_but_not_piped_stdin(self):
         """Interactive body entry gets guidance; a pipeline stays quiet."""
         channel = self._channel("general")

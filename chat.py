@@ -74,6 +74,9 @@ def _check_safe_name(name: str, kind: str):
         raise AgentChatError(f"invalid {kind} name (path traversal blocked): '{name}'")
 
 
+_TASK_MARKER_RE = re.compile(r"task-[A-Za-z0-9][A-Za-z0-9_-]*\.md")
+
+
 def channel_dir(root: Path, channel: str) -> Path:
     _check_safe_name(channel, "channel")
     return root / channel
@@ -361,16 +364,29 @@ def cmd_read(root: Path, a):
     d = require_channel(root, a.channel)
     cur = 0 if a.all else read_cursor(d, a.agent)
     shown = 0
-    for p in message_files(d):
+
+    # Optimization: One O(N) glob scan to find both top seq and unread messages,
+    # avoiding O(N log N) message_files sort and redundant max_seq glob.
+    found = []
+    top = 0
+    for p in d.glob("*.md"):
         seq = _seq_from_name(p.name)
-        if seq <= cur:
+        if seq is None:
             continue
+        if seq > top:
+            top = seq
+        if seq > cur:
+            found.append((seq, p))
+
+    found.sort(key=lambda x: x[0])
+
+    for seq, p in found:
         meta = parse_frontmatter(p)
         if not a.all and not is_relevant(meta, a.agent):
             continue
         _print_message(p)
         shown += 1
-    top = max_seq(d)
+
     if not a.peek:
         write_cursor(d, a.agent, top)
     if shown == 0:
@@ -424,13 +440,25 @@ def cmd_claim(root: Path, a):
     won the race -- exit non-zero so the caller moves on.
     """
     _check_safe_name(a.task, "task")
+    if not _TASK_MARKER_RE.fullmatch(a.task):
+        raise AgentChatError(
+            f"invalid task name (expected task-<id>.md marker): '{a.task}'"
+        )
     d = require_channel(root, a.channel)
     src = d / a.task
     dst = d / (Path(a.task).stem + f".CLAIMED-{slugify(a.agent)}.md")
+    lock = _acquire_lock(d)
     try:
-        os.replace(src, dst)  # atomic on Windows + POSIX when same directory
-    except FileNotFoundError:
-        die(f"task '{a.task}' already claimed or missing (lost the race)", code=3)
+        if dst.exists():
+            die(f"task '{a.task}' already claimed or missing (lost the race)", code=3)
+        if not src.is_file():
+            die(f"task '{a.task}' already claimed or missing (lost the race)", code=3)
+        try:
+            os.replace(src, dst)  # atomic on Windows + POSIX within the claim lock
+        except FileNotFoundError:
+            die(f"task '{a.task}' already claimed or missing (lost the race)", code=3)
+    finally:
+        _release_lock(lock)
     print(f"claimed {a.task} -> {dst.name}")
 
 
