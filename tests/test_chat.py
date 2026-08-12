@@ -105,6 +105,20 @@ class ChatRegressionTests(unittest.TestCase):
         self.assertIn("beta", rendered)
         self.assertIn("last: -", rendered)
 
+    def test_channels_marks_truncated_titles_with_ellipsis(self):
+        """Long channel titles retain an ASCII marker after truncation."""
+        channel = self._channel("general")
+        (channel / "0001-bob-long-title.md").write_text(
+            "---\nseq: 1\nfrom: bob\ntitle: " + ("A" * 41) + "\n---\nbody\n",
+            encoding="utf-8",
+        )
+
+        output = io.StringIO()
+        with contextlib.redirect_stdout(output):
+            chat.cmd_channels(self.root, SimpleNamespace())
+
+        self.assertIn("last: #1 bob: " + ("A" * 37) + "...", output.getvalue())
+
     def test_post_prompts_for_tty_stdin_but_not_piped_stdin(self):
         """Interactive body entry gets guidance; a pipeline stays quiet."""
         channel = self._channel("general")
