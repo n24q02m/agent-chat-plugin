@@ -144,7 +144,7 @@ class ChatRegressionTests(unittest.TestCase):
             )
 
         rendered = output.getvalue()
-        self.assertIn("members=alice,bob", rendered)
+        self.assertIn("members=alice, bob", rendered)
         self.assertNotIn("members=['alice', 'bob']", rendered)
 
     def test_main_maps_missing_body_file_to_application_error(self):
