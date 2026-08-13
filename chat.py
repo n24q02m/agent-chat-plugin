@@ -130,7 +130,7 @@ def parse_frontmatter(path: Path) -> dict:
             if not found_end:
                 return meta
             meta = temp_meta
-    except OSError:
+    except (OSError, UnicodeDecodeError):
         return meta
     # Normalize `to` -> list of recipients (empty == everyone).
     raw = meta.get("to", "").strip()
@@ -299,7 +299,10 @@ def cmd_channels(root: Path, a):
 
 def cmd_roster(root: Path, a):
     d = require_channel(root, a.channel)
-    meta = json.loads((d / "_meta.json").read_text(encoding="utf-8"))
+    try:
+        meta = json.loads((d / "_meta.json").read_text(encoding="utf-8"))
+    except (OSError, ValueError):
+        raise AgentChatError("invalid channel metadata file: _meta.json")
     print(f"channel : {meta.get('channel')}")
     print(f"topic   : {meta.get('topic') or '(none)'}")
     print(f"members : {', '.join(meta.get('members', [])) or '(open)'}")
