@@ -251,7 +251,8 @@ def cmd_init(root: Path, a):
         ),
         encoding="utf-8",
     )
-    print(f"created channel '{a.channel}' at {d}  members={members or '(open)'}")
+    m_str = ",".join(members) if members else "(open)"
+    print(f"created channel '{a.channel}' at {d}  members={m_str}")
 
 
 def cmd_channels(root: Path, a):
@@ -310,7 +311,10 @@ def _read_body(a) -> str:
     if a.body is not None:
         return a.body
     if a.body_file:
-        return Path(a.body_file).read_text(encoding="utf-8")
+        try:
+            return Path(a.body_file).read_text(encoding="utf-8")
+        except OSError as e:
+            raise AgentChatError(f"could not read body file: {e}")
     # Default: read from stdin so agents can pipe long markdown bodies.
     if sys.stdin.isatty():
         print(
@@ -560,6 +564,9 @@ def main(argv=None):
         args.func(root, args)
     except AgentChatError as e:
         die(str(e))
+    except KeyboardInterrupt:
+        print(file=sys.stderr)  # print a newline to cleanly break from input prompts
+        die("cancelled by user", code=130)
 
 
 if __name__ == "__main__":

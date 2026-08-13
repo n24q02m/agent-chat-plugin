@@ -9,3 +9,7 @@
 ## 2024-08-11 - CLI Stdin EOF Prompt
 **Learning:** When prompting for input via stdin in a CLI application, instructing the user to "send EOF" is too technical and can lead to confusion. Platform-specific instructions are needed.
 **Action:** When reading from stdin and using `sys.stdin.isatty()` to provide a prompt, include platform-specific instructions on how to send EOF (e.g., "press Ctrl-D (or Ctrl-Z and Enter on Windows) to finish").
+
+## 2024-08-12 - CLI Error Handling and Formatting
+**Learning:** Raw stack traces from common errors like missing files (OSError) or user cancellation (KeyboardInterrupt) break the illusion of a polished tool. Additionally, printing raw Python data structures (like `['agent-1', 'agent-2']`) instead of formatted strings looks unfinished.
+**Action:** Catch `KeyboardInterrupt` globally to exit cleanly (code 130). Catch common I/O errors and map them to application-specific error types with clear messages. Always format lists (e.g., `, `.join()) before presenting them to the user.

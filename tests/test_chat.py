@@ -134,6 +134,58 @@ class ChatRegressionTests(unittest.TestCase):
 
         self.assertIn(f"last: #1 bob: {title}", output.getvalue())
 
+    def test_init_formats_member_list_for_cli_output(self):
+        """Init output uses a readable member list, not Python repr syntax."""
+        output = io.StringIO()
+        with contextlib.redirect_stdout(output):
+            chat.cmd_init(
+                self.root,
+                SimpleNamespace(channel="general", members="alice,bob", topic=None),
+            )
+
+        rendered = output.getvalue()
+        self.assertIn("members=alice,bob", rendered)
+        self.assertNotIn("members=['alice', 'bob']", rendered)
+
+    def test_main_maps_missing_body_file_to_application_error(self):
+        """A missing body file returns the CLI error contract, not a traceback."""
+        channel = self._channel("general")
+        missing = self.root / "missing.md"
+        stderr = io.StringIO()
+        with contextlib.redirect_stderr(stderr):
+            with self.assertRaises(SystemExit) as raised:
+                chat.main(
+                    [
+                        "--root",
+                        str(self.root),
+                        "post",
+                        "general",
+                        "--from",
+                        "alice",
+                        "--to",
+                        "bob",
+                        "--title",
+                        "Missing",
+                        "--body-file",
+                        str(missing),
+                    ]
+                )
+
+        self.assertEqual(raised.exception.code, 1)
+        self.assertIn("could not read body file", stderr.getvalue())
+        self.assertEqual(list(channel.glob("*.md")), [])
+
+    def test_main_maps_keyboard_interrupt_to_cancelled_exit(self):
+        """Ctrl-C is reported as a clean cancellation with exit code 130."""
+        stderr = io.StringIO()
+        with patch.object(chat, "cmd_init", side_effect=KeyboardInterrupt):
+            with contextlib.redirect_stderr(stderr):
+                with self.assertRaises(SystemExit) as raised:
+                    chat.main(["--root", str(self.root), "init", "cancelled"])
+
+        self.assertEqual(raised.exception.code, 130)
+        self.assertIn("cancelled by user", stderr.getvalue())
+
     def test_init_rejects_reserved_channel_prefixes(self):
         """User channels cannot collide with dotfiles or internal directories."""
         for channel in ("_internal", ".hidden"):
