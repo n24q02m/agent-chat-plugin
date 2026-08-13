@@ -13,3 +13,7 @@
 ## 2024-11-20 - Finding top N messages without full sort
 **Learning:** `cmd_peek` was using `message_files(d)[-a.n:]`, which globs and fully sorts all files just to slice the top `N`. For channels with thousands of messages, this full O(N log N) sort is inefficient.
 **Action:** When finding the top `N` highest sequence numbers from a large set of messages, use an O(N log K) min-heap approach (e.g., via `heapq`) rather than fully sorting all items. This same principle of replacing `message_files(d)` with an O(N) glob applies to simple counting scenarios like `cmd_roster`.
+
+## 2024-08-14 - os.scandir vs Path.glob in tight loops
+**Learning:** `Path.glob()` instantiates a `Path` object for every matched file, which causes significant CPU and memory overhead when scanning directories with thousands of files.
+**Action:** In polling loops (like `cmd_wait`) or frequent hook executions (like `session_inbox.py`), prefer `os.scandir()` which yields lightweight `DirEntry` objects. Only instantiate `Path` objects for the files that actually pass the filtering logic.
