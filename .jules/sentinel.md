@@ -17,3 +17,8 @@
 **Vulnerability:** The application crashed with raw stack traces when encountering malformed `_meta.json` or invalid UTF-8 bytes in message files, creating a Denial of Service (DoS) and leaking implementation details.
 **Learning:** Always fail securely by catching decoding exceptions like `UnicodeDecodeError` and `json.decoder.JSONDecodeError` (`ValueError`) when parsing external or user-provided files, and wrap them in friendly domain errors.
 **Prevention:** Use `try...except (OSError, ValueError):` when parsing JSON files, and `try...except (OSError, UnicodeDecodeError):` when reading text files with a specific encoding.
+
+## 2026-08-14 - Prevent DoS and Information Leaks in File Parsing
+**Vulnerability:** Uncaught UnicodeDecodeError when parsing external message or body files leaked raw Python stack traces and caused abrupt crashes.
+**Learning:** The built-in pathlib.read_text can raise UnicodeDecodeError (which subclasses ValueError) if the file contains invalid UTF-8 bytes.
+**Prevention:** Always catch both OSError and ValueError when parsing external text files to fail securely, either by raising domain-specific errors or substituting unreadable content.
