@@ -411,14 +411,22 @@ def cmd_wait(root: Path, a):
     deadline = time.time() + a.timeout
     while True:
         found = []
-        # Optimization: use O(N) glob scan instead of O(N log N) message_files sort
-        for p in d.glob("*.md"):
-            seq = _seq_from_name(p.name)
-            if seq is None or seq <= cur:
-                continue
-            meta = parse_frontmatter(p)
-            if is_relevant(meta, a.agent):
-                found.append(p)
+        # Optimization: use os.scandir to avoid Path instantiation overhead for
+        # thousands of old messages per tick.
+        try:
+            with os.scandir(d) as it:
+                for entry in it:
+                    if not entry.name.endswith(".md"):
+                        continue
+                    seq = _seq_from_name(entry.name)
+                    if seq is None or seq <= cur:
+                        continue
+                    p = Path(entry.path)
+                    meta = parse_frontmatter(p)
+                    if is_relevant(meta, a.agent):
+                        found.append(p)
+        except OSError:
+            pass
         if found:
             # Sort only the newly found messages
             found.sort(key=lambda p: _seq_from_name(p.name))
