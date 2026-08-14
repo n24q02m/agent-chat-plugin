@@ -294,10 +294,11 @@ def cmd_channels(root: Path, a):
         print(f"(no channels yet under {root})")
         return
     w = max(len("CHANNEL"), max(len(r[0]) for r in rows))
-    print(f"{'CHANNEL'.ljust(w)}  MSGS  MEMBERS / LAST")
+    w_msgs = max(len("MSGS"), max(len(str(r[2])) for r in rows))
+    print(f"{'CHANNEL'.ljust(w)}  {'MSGS'.rjust(w_msgs)}  MEMBERS / LAST")
     for name, members, n, last in rows:
-        print(f"{name.ljust(w)}  {str(n).rjust(4)}  {members}")
-        print(f"{' '.ljust(w)}        last: {last}")
+        print(f"{name.ljust(w)}  {str(n).rjust(w_msgs)}  {members}")
+        print(f"{' '.ljust(w)}  {' '.ljust(w_msgs)}  last: {last}")
 
 
 def cmd_roster(root: Path, a):
