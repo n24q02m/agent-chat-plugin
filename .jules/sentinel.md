@@ -12,3 +12,8 @@
 **Vulnerability:** The application allowed user-provided filenames to start with reserved prefixes like `.` or `_` in `chat.py`. This could allow Insecure Direct Object Reference (IDOR) and Denial of Service (DoS) attacks even if path traversal is blocked.
 **Learning:** Explicitly blocking reserved prefixes for user-supplied filenames protects internal system files or directories and prevents unauthorized access or manipulation.
 **Prevention:** Implement checks for reserved prefixes (`.` and `_`) in filename validation functions, such as `_check_safe_name` in `chat.py`.
+
+## 2024-08-13 - [Denial of Service via Malformed Data]
+**Vulnerability:** The application crashed with raw stack traces when encountering malformed `_meta.json` or invalid UTF-8 bytes in message files, creating a Denial of Service (DoS) and leaking implementation details.
+**Learning:** Always fail securely by catching decoding exceptions like `UnicodeDecodeError` and `json.decoder.JSONDecodeError` (`ValueError`) when parsing external or user-provided files, and wrap them in friendly domain errors.
+**Prevention:** Use `try...except (OSError, ValueError):` when parsing JSON files, and `try...except (OSError, UnicodeDecodeError):` when reading text files with a specific encoding.
