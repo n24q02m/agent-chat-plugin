@@ -17,3 +17,7 @@
 ## 2024-08-13 - Truncate long strings in CLI tables
 **Learning:** Extremely long member lists can push CLI table columns out of alignment and clutter the output, making it unreadable. Additionally, raw lists formatted without spaces (e.g., `alice,bob,charlie`) are visually dense.
 **Action:** When displaying lists in CLI tables (e.g., in `cmd_channels`), use an ellipsis (`...`) to truncate the string to a reasonable length instead of a hard slice, preventing abrupt cut-offs. Also format lists with `, ` (comma + space) for better readability.
+
+## 2026-08-14 - Ensure column headers are accounted for in dynamic widths
+**Learning:** When formatting dynamic column widths in CLI output, always ensure the calculation accounts for the length of the column headers, not just the data, to guarantee visual alignment.
+**Action:** Dynamically calculate the maximum width for the column by considering both the header and all rows' data widths, and use string formatting functions like `rjust()` or `ljust()` with this calculated width.
