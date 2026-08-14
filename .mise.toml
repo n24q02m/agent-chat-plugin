@@ -8,7 +8,7 @@
 python = "3.14.7"
 # Same version as CI and .pre-commit-config.yaml. "latest" silently changes the
 # rule set under you: ruff 0.16.0 widened the defaults and turned main red.
-ruff = "0.15.7"
+ruff = "0.16.3"
 
 [tasks.lint]
 description = "Lint with ruff"
