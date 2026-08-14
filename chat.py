@@ -251,7 +251,7 @@ def cmd_init(root: Path, a):
         ),
         encoding="utf-8",
     )
-    m_str = ",".join(members) if members else "(open)"
+    m_str = ", ".join(members) if members else "(open)"
     print(f"created channel '{a.channel}' at {d}  members={m_str}")
 
 
@@ -284,8 +284,11 @@ def cmd_channels(root: Path, a):
             if len(title) > 40:
                 title = title[:37] + "..."
             last = f"#{last_seq} {lm.get('from', '?')}: {title}"
+        members_str = ", ".join(meta.get("members", [])) or "(open)"
+        if len(members_str) > 40:
+            members_str = members_str[:37] + "..."
         rows.append(
-            (chan.name, ",".join(meta.get("members", [])) or "(open)", count, last)
+            (chan.name, members_str, count, last)
         )
     if not rows:
         print(f"(no channels yet under {root})")
@@ -302,7 +305,7 @@ def cmd_roster(root: Path, a):
     try:
         meta = json.loads((d / "_meta.json").read_text(encoding="utf-8"))
     except (OSError, ValueError):
-        raise AgentChatError("invalid channel metadata file: _meta.json")
+        raise AgentChatError(f"could not read or parse _meta.json for channel '{a.channel}'")
     print(f"channel : {meta.get('channel')}")
     print(f"topic   : {meta.get('topic') or '(none)'}")
     print(f"members : {', '.join(meta.get('members', [])) or '(open)'}")

@@ -13,3 +13,7 @@
 ## 2024-08-12 - CLI Error Handling and Formatting
 **Learning:** Raw stack traces from common errors like missing files (OSError) or user cancellation (KeyboardInterrupt) break the illusion of a polished tool. Additionally, printing raw Python data structures (like `['agent-1', 'agent-2']`) instead of formatted strings looks unfinished.
 **Action:** Catch `KeyboardInterrupt` globally to exit cleanly (code 130). Catch common I/O errors and map them to application-specific error types with clear messages. Always format lists (e.g., `, `.join()) before presenting them to the user.
+
+## 2024-08-13 - Truncate long strings in CLI tables
+**Learning:** Extremely long member lists can push CLI table columns out of alignment and clutter the output, making it unreadable. Additionally, raw lists formatted without spaces (e.g., `alice,bob,charlie`) are visually dense.
+**Action:** When displaying lists in CLI tables (e.g., in `cmd_channels`), use an ellipsis (`...`) to truncate the string to a reasonable length instead of a hard slice, preventing abrupt cut-offs. Also format lists with `, ` (comma + space) for better readability.
