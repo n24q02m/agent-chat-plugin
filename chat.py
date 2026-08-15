@@ -221,10 +221,16 @@ def write_cursor(chan: Path, agent: str, seq: int):
 
 def max_seq(chan: Path) -> int:
     maximum = 0
-    for path in chan.glob("*.md"):
-        seq = _seq_from_name(path.name)
-        if seq is not None and seq > maximum:
-            maximum = seq
+    # Optimization: use os.scandir instead of Path.glob to avoid Path instantiation overhead
+    try:
+        with os.scandir(chan) as it:
+            for entry in it:
+                if entry.name.endswith(".md"):
+                    seq = _seq_from_name(entry.name)
+                    if seq is not None and seq > maximum:
+                        maximum = seq
+    except OSError:
+        pass
     return maximum
 
 
@@ -269,14 +275,23 @@ def cmd_channels(root: Path, a):
         count = 0
         last_path = None
         last_seq = 0
-        for path in chan.glob("*.md"):
-            seq = _seq_from_name(path.name)
-            if seq is None:
-                continue
-            count += 1
-            if last_path is None or seq > last_seq:
-                last_path = path
-                last_seq = seq
+        # Optimization: use os.scandir instead of Path.glob to avoid Path instantiation
+        # overhead for thousands of messages per channel when counting and finding the latest.
+        try:
+            with os.scandir(chan) as it:
+                for entry in it:
+                    if not entry.name.endswith(".md"):
+                        continue
+                    seq = _seq_from_name(entry.name)
+                    if seq is None:
+                        continue
+                    count += 1
+                    if last_path is None or seq > last_seq:
+                        # Only instantiate Path for the max seq to minimize overhead
+                        last_path = Path(entry.path)
+                        last_seq = seq
+        except OSError:
+            pass
         last = "-"
         if last_path is not None:
             lm = parse_frontmatter(last_path)
@@ -309,7 +324,16 @@ def cmd_roster(root: Path, a):
     print(f"channel : {meta.get('channel')}")
     print(f"topic   : {meta.get('topic') or '(none)'}")
     print(f"members : {', '.join(meta.get('members', [])) or '(open)'}")
-    count = sum(1 for p in d.glob("*.md") if _seq_from_name(p.name) is not None)
+    count = 0
+    # Optimization: use os.scandir instead of Path.glob to avoid Path instantiation overhead
+    try:
+        with os.scandir(d) as it:
+            count = sum(
+                1 for entry in it
+                if entry.name.endswith(".md") and _seq_from_name(entry.name) is not None
+            )
+    except OSError:
+        pass
     print(f"messages: {count}")
 
 
