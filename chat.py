@@ -319,7 +319,7 @@ def _read_body(a) -> str:
     if a.body_file:
         try:
             return Path(a.body_file).read_text(encoding="utf-8")
-        except OSError as e:
+        except (OSError, UnicodeDecodeError) as e:
             raise AgentChatError(f"could not read body file: {e}")
     # Default: read from stdin so agents can pipe long markdown bodies.
     if sys.stdin.isatty():
@@ -327,7 +327,10 @@ def _read_body(a) -> str:
             "agent-chat: Enter message body; press Ctrl-D (or Ctrl-Z and Enter on Windows) to finish.",
             file=sys.stderr,
         )
-    data = sys.stdin.read()
+    try:
+        data = sys.stdin.read()
+    except UnicodeDecodeError as e:
+        raise AgentChatError(f"could not read stdin: {e}")
     if not data.strip():
         raise AgentChatError("empty body (pass --body, --body-file, or pipe via stdin)")
     return data
@@ -371,7 +374,10 @@ def cmd_post(root: Path, a):
 
 def _print_message(path: Path):
     print("=" * 70)
-    print(path.read_text(encoding="utf-8").rstrip())
+    try:
+        print(path.read_text(encoding="utf-8").rstrip())
+    except (OSError, UnicodeDecodeError) as e:
+        print(f"(message '{path.name}' could not be read or decoded: {e})")
     print()
 
 
