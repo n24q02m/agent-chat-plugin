@@ -17,3 +17,7 @@
 ## 2024-08-13 - Truncate long strings in CLI tables
 **Learning:** Extremely long member lists can push CLI table columns out of alignment and clutter the output, making it unreadable. Additionally, raw lists formatted without spaces (e.g., `alice,bob,charlie`) are visually dense.
 **Action:** When displaying lists in CLI tables (e.g., in `cmd_channels`), use an ellipsis (`...`) to truncate the string to a reasonable length instead of a hard slice, preventing abrupt cut-offs. Also format lists with `, ` (comma + space) for better readability.
+
+## 2024-08-16 - CLI Help Text Usability
+**Learning:** For Python CLI applications, providing descriptive `help` text for all `argparse` arguments (both positional and optional) significantly improves usability by making the interface self-documenting via the `--help` flag.
+**Action:** Always include a `help` argument in `add_argument()` calls for both positional and optional parameters in CLI applications.
