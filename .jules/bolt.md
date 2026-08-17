@@ -17,3 +17,7 @@
 ## 2024-08-14 - os.scandir vs Path.glob in tight loops
 **Learning:** `Path.glob()` instantiates a `Path` object for every matched file, which causes significant CPU and memory overhead when scanning directories with thousands of files.
 **Action:** In polling loops (like `cmd_wait`) or frequent hook executions (like `session_inbox.py`), prefer `os.scandir()` which yields lightweight `DirEntry` objects. Only instantiate `Path` objects for the files that actually pass the filtering logic.
+
+## 2024-11-20 - os.scandir vs Path.glob in general loops
+**Learning:** Just as in tight polling loops, `Path.glob()` instantiates a `Path` object for every matched file which causes significant CPU and memory overhead across all commands (like `cmd_channels`, `cmd_roster`, `cmd_read`, `cmd_peek`, `max_seq`, and `_next_seq`) when scanning directories with thousands of files.
+**Action:** Use `os.scandir()` which yields lightweight `DirEntry` objects. Only instantiate `Path` objects for the files that actually pass the filtering logic, or avoid it entirely if only counting or finding max sequence.
