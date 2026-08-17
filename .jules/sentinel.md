@@ -17,3 +17,8 @@
 **Vulnerability:** The application crashed with raw stack traces when encountering malformed `_meta.json` or invalid UTF-8 bytes in message files, creating a Denial of Service (DoS) and leaking implementation details.
 **Learning:** Always fail securely by catching decoding exceptions like `UnicodeDecodeError` and `json.decoder.JSONDecodeError` (`ValueError`) when parsing external or user-provided files, and wrap them in friendly domain errors.
 **Prevention:** Use `try...except (OSError, ValueError):` when parsing JSON files, and `try...except (OSError, UnicodeDecodeError):` when reading text files with a specific encoding.
+
+## 2024-05-24 - Catching UnicodeDecodeError on text reads
+**Vulnerability:** File reads (`Path.read_text`) in `_read_body` and `_print_message` crashed with stack traces on non-UTF-8 payload.
+**Learning:** Users could provide non-UTF-8 files or messages (e.g. `\xff`) which crashed the CLI with a stack trace. This violates fail-secure practices and causes Denial of Service.
+**Prevention:** Always wrap text decoding file operations (like `Path.read_text`) in a `try...except UnicodeDecodeError` and handle gracefully or raise domain errors.
