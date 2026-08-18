@@ -269,14 +269,23 @@ def cmd_channels(root: Path, a):
         count = 0
         last_path = None
         last_seq = 0
-        for path in chan.glob("*.md"):
-            seq = _seq_from_name(path.name)
-            if seq is None:
-                continue
-            count += 1
-            if last_path is None or seq > last_seq:
-                last_path = path
-                last_seq = seq
+
+        # Optimization: os.scandir avoids Path instantiation overhead for all messages
+        try:
+            with os.scandir(chan) as it:
+                for entry in it:
+                    if not entry.name.endswith(".md"):
+                        continue
+                    seq = _seq_from_name(entry.name)
+                    if seq is None:
+                        continue
+                    count += 1
+                    if last_path is None or seq > last_seq:
+                        last_path = Path(entry.path)
+                        last_seq = seq
+        except OSError:
+            pass
+
         last = "-"
         if last_path is not None:
             lm = parse_frontmatter(last_path)
