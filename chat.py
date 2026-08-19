@@ -371,7 +371,10 @@ def cmd_post(root: Path, a):
 
 def _print_message(path: Path):
     print("=" * 70)
-    print(path.read_text(encoding="utf-8").rstrip())
+    try:
+        print(path.read_text(encoding="utf-8").rstrip())
+    except (OSError, UnicodeDecodeError):
+        print(f"(error: could not read message {path.name})")
     print()
 
 
