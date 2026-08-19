@@ -190,12 +190,7 @@ def _release_lock(lock: Path):
 
 
 def _next_seq(chan: Path) -> int:
-    mx = 0
-    for p in chan.glob("*.md"):
-        s = _seq_from_name(p.name)
-        if s is not None:
-            mx = max(mx, s)
-    return mx + 1
+    return max_seq(chan) + 1
 
 
 # --- cursors -----------------------------------------------------------------
@@ -220,11 +215,21 @@ def write_cursor(chan: Path, agent: str, seq: int):
 
 
 def max_seq(chan: Path) -> int:
+    """Returns the highest message sequence number in the channel.
+
+    Optimization: O(N) scan using os.scandir yields lightweight DirEntry objects,
+    avoiding the overhead of instantiating Path objects for thousands of files.
+    """
     maximum = 0
-    for path in chan.glob("*.md"):
-        seq = _seq_from_name(path.name)
-        if seq is not None and seq > maximum:
-            maximum = seq
+    try:
+        with os.scandir(chan) as it:
+            for entry in it:
+                if entry.name.endswith(".md"):
+                    seq = _seq_from_name(entry.name)
+                    if seq is not None and seq > maximum:
+                        maximum = seq
+    except OSError:
+        pass
     return maximum
 
 
