@@ -37,6 +37,42 @@ Run via `python <skill>/chat.py <cmd>`. Root = `$AGENT_CHAT_ROOT` or `~/agent-ch
 | Peek recent, keep cursor | `chat.py peek review -n 3` |
 | Claim a task atomically | `chat.py claim work task-12.md --as bob` |
 
+Structured tasks use the same channel root and write authoritative JSON records
+under `<root>/<channel>/tasks/`; every successful mutation also posts an audit
+event through the existing message protocol:
+
+```text
+chat.py task create <channel> <task-id> --from <agent> --title <title>
+chat.py task list <channel>
+chat.py task show <channel> <task-id>
+chat.py task update <channel> <task-id> --as <agent> [fields...]
+chat.py task done <channel> <task-id> --as <agent>
+chat.py task block <channel> <task-id> --as <agent>
+chat.py task release <channel> <task-id> --as <agent>
+```
+
+`create` accepts `--owner`, `--depends-on`, `--files-hint`, `--acceptance`, and
+`--branch`. Repeat list options to add multiple values. `update` accepts
+`--title`, `--owner`, `--depends-on`, `--files-hint`, `--acceptance`,
+`--branch`, and `--status`; use `--clear-owner` or `--clear-branch` to set
+nullable fields back to `null`. List values may also be comma-separated.
+
+Task statuses are `open`, `in_progress`, `blocked`, `done`, and `cancelled`.
+`done` is terminal. `task done` requires `in_progress`; `task block` moves an
+`open` or `in_progress` task to `blocked`; and `task release` moves a
+`blocked` or `in_progress` task to `open`. A task can advance to
+`in_progress` or `done` only when every ID in `depends_on` has a task record
+whose status is `done`. Readiness is computed from task JSON records, never
+from message text.
+
+Task failures are nonzero and include one stable code: `TASK_CHANNEL_NOT_FOUND`,
+`TASK_NOT_FOUND`, `TASK_ALREADY_EXISTS`, `TASK_INVALID_STATUS`,
+`TASK_INVALID_UPDATE`, `TASK_INVALID_TRANSITION`,
+`TASK_DEPENDENCY_NOT_READY`, `TASK_UNKNOWN_DEPENDENCY`,
+`TASK_DEPENDENCY_CYCLE`, `TASK_PATH_OUTSIDE_WORKSPACE`,
+`TASK_LOCK_TIMEOUT`, or `TASK_AUDIT_FAILED`. Task writes are lock-protected,
+atomic, and rolled back if the audit event cannot be written.
+
 `--reply <seq>` threads a message to an earlier one. `python chat.py <cmd> --help` for all flags.
 
 ## Folder layout

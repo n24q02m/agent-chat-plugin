@@ -1,5 +1,7 @@
 """Focused Task 2 tests for the typed task model and atomic store."""
 
+import contextlib
+import io
 import json
 import threading
 import tempfile
@@ -360,6 +362,180 @@ class TaskStoreTests(unittest.TestCase):
         bodies = [path.read_text(encoding="utf-8") for path in messages]
         self.assertTrue(any("task.created" in body for body in bodies))
         self.assertTrue(any("task.updated" in body for body in bodies))
+
+
+class TaskCommandTests(unittest.TestCase):
+    def setUp(self):
+        self.temp_dir = tempfile.TemporaryDirectory()
+        self.root = Path(self.temp_dir.name)
+        chat.cmd_init(
+            self.root,
+            SimpleNamespace(channel="review", members="alice,bob", topic="Task board"),
+        )
+
+    def tearDown(self):
+        self.temp_dir.cleanup()
+
+    def run_cli(self, *argv):
+        stdout = io.StringIO()
+        stderr = io.StringIO()
+        with contextlib.redirect_stdout(stdout), contextlib.redirect_stderr(stderr):
+            try:
+                chat.main(["--root", str(self.root), *argv])
+            except SystemExit as error:
+                return error.code, stdout.getvalue(), stderr.getvalue()
+        return 0, stdout.getvalue(), stderr.getvalue()
+
+    def test_task_commands_create_list_show_update_and_status_transitions(self):
+        code, created, error = self.run_cli(
+            "task",
+            "create",
+            "review",
+            "T-0001",
+            "--from",
+            "alice",
+            "--title",
+            "Document the review flow",
+        )
+        self.assertEqual(code, 0)
+        self.assertEqual(error, "")
+        self.assertEqual(created, "created task T-0001 [open]\n")
+
+        first_show = self.run_cli("task", "show", "review", "T-0001")
+        second_show = self.run_cli("task", "show", "review", "T-0001")
+        self.assertEqual(first_show, second_show)
+        self.assertIn("status: open", first_show[1])
+        self.assertIn("dependencies: ready", first_show[1])
+
+        first_list = self.run_cli("task", "list", "review")
+        second_list = self.run_cli("task", "list", "review")
+        self.assertEqual(first_list, second_list)
+        self.assertIn("T-0001  open  -  -  Document the review flow", first_list[1])
+
+        code, updated, error = self.run_cli(
+            "task",
+            "update",
+            "review",
+            "T-0001",
+            "--as",
+            "bob",
+            "--title",
+            "Review flow",
+        )
+        self.assertEqual((code, error), (0, ""))
+        self.assertEqual(updated, "updated task T-0001 [open]\n")
+
+        code, blocked, error = self.run_cli(
+            "task", "block", "review", "T-0001", "--as", "bob"
+        )
+        self.assertEqual((code, error), (0, ""))
+        self.assertEqual(blocked, "blocked task T-0001 [blocked]\n")
+        code, released, error = self.run_cli(
+            "task", "release", "review", "T-0001", "--as", "bob"
+        )
+        self.assertEqual((code, error), (0, ""))
+        self.assertEqual(released, "released task T-0001 [open]\n")
+
+    def test_task_commands_reject_advance_until_dependencies_are_done(self):
+        self.assertEqual(
+            self.run_cli(
+                "task",
+                "create",
+                "review",
+                "T-0001",
+                "--from",
+                "alice",
+                "--title",
+                "Prerequisite",
+            )[0],
+            0,
+        )
+        self.assertEqual(
+            self.run_cli(
+                "task",
+                "create",
+                "review",
+                "T-0002",
+                "--from",
+                "alice",
+                "--title",
+                "Dependent",
+                "--depends-on",
+                "T-0001",
+            )[0],
+            0,
+        )
+
+        code, _, error = self.run_cli(
+            "task",
+            "update",
+            "review",
+            "T-0002",
+            "--as",
+            "bob",
+            "--status",
+            "in_progress",
+        )
+        self.assertEqual(code, 2)
+        self.assertIn("TASK_DEPENDENCY_NOT_READY", error)
+        self.assertEqual(self.run_cli("task", "show", "review", "T-0002")[0], 0)
+        self.assertIn("status: open", self.run_cli("task", "show", "review", "T-0002")[1])
+
+        self.assertEqual(
+            self.run_cli(
+                "task",
+                "update",
+                "review",
+                "T-0001",
+                "--as",
+                "alice",
+                "--status",
+                "in_progress",
+            )[0],
+            0,
+        )
+        self.assertEqual(
+            self.run_cli("task", "done", "review", "T-0001", "--as", "alice")[0],
+            0,
+        )
+        self.assertEqual(
+            self.run_cli(
+                "task",
+                "update",
+                "review",
+                "T-0002",
+                "--as",
+                "bob",
+                "--status",
+                "in_progress",
+            )[0],
+            0,
+        )
+
+    def test_task_commands_report_stable_errors_and_preserve_existing_parser(self):
+        code, _, error = self.run_cli("task", "show", "review", "missing")
+        self.assertEqual(code, 2)
+        self.assertIn("TASK_NOT_FOUND", error)
+
+        code, _, error = self.run_cli(
+            "task", "done", "review", "missing", "--as", "alice"
+        )
+        self.assertEqual(code, 2)
+        self.assertIn("TASK_NOT_FOUND", error)
+
+        code, output, error = self.run_cli(
+            "post",
+            "review",
+            "--from",
+            "alice",
+            "--title",
+            "legacy",
+            "--body",
+            "still works",
+        )
+        self.assertEqual(code, 0)
+        self.assertEqual(error, "")
+        self.assertIn("posted #", output)
 
 
 if __name__ == "__main__":

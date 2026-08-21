@@ -240,6 +240,61 @@ class TaskStore:
             )
         return task
 
+    @staticmethod
+    def _dependency_blockers(
+        task: TaskRecord, records: list[TaskRecord]
+    ) -> list[str]:
+        statuses = {record.id: record.status for record in records}
+        return [
+            dependency
+            for dependency in task.depends_on
+            if statuses.get(dependency) != "done"
+        ]
+
+    def dependency_statuses(self, task_id: str) -> dict[str, str]:
+        """Return dependency statuses from the authoritative task snapshot."""
+
+        path = self._task_path(task_id)
+        with self._mutation_lock():
+            records = self._read_snapshot()
+            tasks = {record.id: record for record in records}
+            task = tasks.get(path.stem)
+            if task is None:
+                raise TaskValidationError(
+                    "TASK_NOT_FOUND", f"task record does not exist: {task_id}"
+                )
+            return {
+                dependency: tasks[dependency].status
+                for dependency in task.depends_on
+            }
+
+    def dependencies_ready(self, task_id: str) -> bool:
+        """Report readiness using task records, never message text."""
+
+        path = self._task_path(task_id)
+        with self._mutation_lock():
+            records = self._read_snapshot()
+            tasks = {record.id: record for record in records}
+            task = tasks.get(path.stem)
+            if task is None:
+                raise TaskValidationError(
+                    "TASK_NOT_FOUND", f"task record does not exist: {task_id}"
+                )
+            return not self._dependency_blockers(task, records)
+
+    def _assert_dependencies_ready(
+        self, task: TaskRecord, records: list[TaskRecord]
+    ) -> None:
+        blockers = self._dependency_blockers(task, records)
+        if blockers:
+            raise TaskValidationError(
+                "TASK_DEPENDENCY_NOT_READY",
+                f"task {task.id} depends on unfinished tasks: {', '.join(blockers)}",
+                task_id=task.id,
+                dependencies=blockers,
+            )
+
+
 
     @staticmethod
     def _fsync_directory(directory: Path) -> None:
@@ -436,6 +491,8 @@ class TaskStore:
                 candidate if record.id == task_id else record for record in records
             ]
             self._validate_graph(replaced)
+            if candidate.status in {"in_progress", "done"}:
+                self._assert_dependencies_ready(candidate, replaced)
             self._atomic_write(path, candidate)
             try:
                 self._post_event(
@@ -515,12 +572,32 @@ def update_task(
     )
 
 
+def dependency_statuses(
+    channel: Path | str,
+    task_id: str,
+    *,
+    root: Path | str | None = None,
+) -> dict[str, str]:
+    return TaskStore(channel, root=root).dependency_statuses(task_id)
+
+
+def dependencies_ready(
+    channel: Path | str,
+    task_id: str,
+    *,
+    root: Path | str | None = None,
+) -> bool:
+    return TaskStore(channel, root=root).dependencies_ready(task_id)
+
+
 __all__ = [
     "TaskError",
     "TaskRecord",
     "TaskStore",
     "TaskValidationError",
     "create_task",
+    "dependencies_ready",
+    "dependency_statuses",
     "list_tasks",
     "load_task",
     "show_task",

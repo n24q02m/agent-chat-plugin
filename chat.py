@@ -15,22 +15,23 @@ allocated under a filesystem lock (atomic `mkdir`) so two sessions can never cla
 the same number -- the exact race that produced duplicate "seq 11" files in the
 hand-rolled prototype.
 
-Commands: init | channels | roster | post | read | wait | peek | claim
+Commands: init | channels | roster | post | read | wait | peek | claim | task
 Run `python chat.py <command> --help` for flags.
 """
 
 from __future__ import annotations
 
 import argparse
+import contextlib
 import datetime as _dt
+import heapq
+import io
 import json
 import os
 import re
 import sys
 import time
 from pathlib import Path
-
-import heapq
 
 # --- root + small helpers ----------------------------------------------------
 
@@ -502,6 +503,145 @@ def cmd_claim(root: Path, a):
     print(f"claimed {a.task} -> {dst.name}")
 
 
+def _task_store(root: Path, channel: str):
+    from agent_chat.task_store import TaskStore
+
+    return TaskStore(channel_dir(root, channel), root=root)
+
+
+
+def _task_values(values) -> list[str]:
+    items: list[str] = []
+    for value in values or []:
+        items.extend(item.strip() for item in value.split(",") if item.strip())
+    return items
+
+
+def _task_actor(args) -> str:
+    return args.actor
+
+
+def _task_owner(value: str | None) -> str | None:
+    return value if value else None
+
+
+def _print_task_result(action: str, task) -> None:
+    print(f"{action} task {task.id} [{task.status}]")
+
+
+def cmd_task_create(root: Path, a):
+    store = _task_store(root, a.channel)
+    from agent_chat.task_model import TaskRecord
+
+    task = TaskRecord.from_dict(
+        {
+            "id": a.task_id,
+            "channel": a.channel,
+            "title": a.title,
+            "status": "open",
+            "owner": _task_owner(a.owner),
+            "created_by": a.creator,
+            "depends_on": _task_values(a.depends_on),
+            "files_hint": _task_values(a.files_hint),
+            "acceptance": _task_values(a.acceptance),
+            "lease_expires_at": None,
+            "branch": a.branch,
+            "updated_at": now_iso(),
+        },
+    )
+    with contextlib.redirect_stdout(io.StringIO()):
+        created = store.create(task, actor=a.creator)
+    _print_task_result("created", created)
+
+
+def cmd_task_list(root: Path, a):
+    store = _task_store(root, a.channel)
+    tasks = store.list()
+    print("ID  STATUS  OWNER  DEPENDS_ON  TITLE")
+    if not tasks:
+        print("(no tasks)")
+        return
+    for task in tasks:
+        owner = task.owner or "-"
+        dependencies = ",".join(task.depends_on) or "-"
+        print(
+            f"{task.id}  {task.status}  {owner}  {dependencies}  "
+            f"{task.title}"
+        )
+
+
+def cmd_task_show(root: Path, a):
+    store = _task_store(root, a.channel)
+    task = store.show(a.task_id)
+    statuses = store.dependency_statuses(task.id)
+    if not statuses:
+        dependency_summary = "ready"
+    else:
+        blocked = [
+            f"{dependency}={status}"
+            for dependency, status in statuses.items()
+            if status != "done"
+        ]
+        dependency_summary = "ready" if not blocked else "blocked (" + ", ".join(blocked) + ")"
+    print(f"id: {task.id}")
+    print(f"channel: {task.channel}")
+    print(f"title: {task.title}")
+    print(f"status: {task.status}")
+    print(f"owner: {task.owner or '-'}")
+    print(f"created_by: {task.created_by}")
+    print(f"depends_on: {','.join(task.depends_on) or '-'}")
+    print(f"dependencies: {dependency_summary}")
+    print(f"files_hint: {','.join(task.files_hint) or '-'}")
+    print(f"acceptance: {'; '.join(task.acceptance) or '-'}")
+    print(f"lease_expires_at: {task.lease_expires_at or '-'}")
+    print(f"branch: {task.branch or '-'}")
+    print(f"updated_at: {task.updated_at}")
+
+
+def cmd_task_update(root: Path, a):
+    store = _task_store(root, a.channel)
+    raw = vars(a)
+    changes = {}
+    for field in ("title", "owner", "branch", "status"):
+        if field in raw:
+            changes[field] = raw[field]
+    for field in ("depends_on", "files_hint", "acceptance"):
+        if field in raw:
+            changes[field] = _task_values(raw[field])
+    if raw.get("clear_owner"):
+        changes["owner"] = None
+    if raw.get("clear_branch"):
+        changes["branch"] = None
+    if not changes:
+        from agent_chat.task_model import TaskValidationError
+
+        raise TaskValidationError(
+            "TASK_INVALID_UPDATE", "task update requires at least one field"
+        )
+    with contextlib.redirect_stdout(io.StringIO()):
+        task = store.update(a.task_id, changes, actor=_task_actor(a))
+    _print_task_result("updated", task)
+
+
+def _task_transition(root: Path, a, status: str, action: str):
+    store = _task_store(root, a.channel)
+    with contextlib.redirect_stdout(io.StringIO()):
+        task = store.update(a.task_id, actor=_task_actor(a), status=status)
+    _print_task_result(action, task)
+
+
+def cmd_task_done(root: Path, a):
+    _task_transition(root, a, "done", "done")
+
+
+def cmd_task_block(root: Path, a):
+    _task_transition(root, a, "blocked", "blocked")
+
+
+def cmd_task_release(root: Path, a):
+    _task_transition(root, a, "open", "released")
+
+
 # --- argparse ----------------------------------------------------------------
 
 
@@ -568,12 +708,72 @@ def build_parser() -> argparse.ArgumentParser:
     s.add_argument("task", help="task marker filename, e.g. task-12.md")
     s.add_argument("--as", dest="agent", required=True)
     s.set_defaults(func=cmd_claim)
+    task = sub.add_parser("task", help="manage structured task records")
+    task_sub = task.add_subparsers(dest="task_cmd", required=True)
+
+    s = task_sub.add_parser("create", help="create a task record")
+    s.add_argument("channel")
+    s.add_argument("task_id")
+    s.add_argument("--from", "--created-by", dest="creator", required=True)
+    s.add_argument("--title", required=True)
+    s.add_argument("--owner")
+    s.add_argument("--depends-on", action="append", default=[])
+    s.add_argument("--files-hint", action="append", default=[])
+    s.add_argument("--acceptance", action="append", default=[])
+    s.add_argument("--branch")
+    s.set_defaults(func=cmd_task_create)
+
+    s = task_sub.add_parser("list", help="list task records")
+    s.add_argument("channel")
+    s.set_defaults(func=cmd_task_list)
+
+    s = task_sub.add_parser("show", help="show one task record")
+    s.add_argument("channel")
+    s.add_argument("task_id")
+    s.set_defaults(func=cmd_task_show)
+
+    s = task_sub.add_parser("update", help="update task fields")
+    s.add_argument("channel")
+    s.add_argument("task_id")
+    s.add_argument("--as", "--from", dest="actor", required=True)
+    s.add_argument("--title", default=argparse.SUPPRESS)
+    s.add_argument("--owner", default=argparse.SUPPRESS)
+    s.add_argument("--clear-owner", action="store_true")
+    s.add_argument("--depends-on", action="append", default=argparse.SUPPRESS)
+    s.add_argument("--files-hint", action="append", default=argparse.SUPPRESS)
+    s.add_argument("--acceptance", action="append", default=argparse.SUPPRESS)
+    s.add_argument("--branch", default=argparse.SUPPRESS)
+    s.add_argument("--clear-branch", action="store_true")
+    s.add_argument("--status", default=argparse.SUPPRESS)
+
+    s.set_defaults(func=cmd_task_update)
+
+    for command, handler, help_text, action in (
+        ("done", cmd_task_done, "mark a task done", "done"),
+        ("block", cmd_task_block, "mark a task blocked", "blocked"),
+        ("release", cmd_task_release, "release a task back to open", "released"),
+    ):
+        s = task_sub.add_parser(command, help=help_text)
+        s.add_argument("channel")
+        s.add_argument("task_id")
+        s.add_argument("--as", "--from", dest="actor", required=True)
+        s.set_defaults(func=handler)
+
     return p
+
+
+def _is_task_error(error: Exception) -> bool:
+    try:
+        from agent_chat.task_model import TaskError
+    except (ImportError, ModuleNotFoundError):
+        return False
+    return isinstance(error, TaskError)
 
 
 def main(argv=None):
     args = build_parser().parse_args(argv)
     root = root_dir(args.root)
+
     try:
         args.func(root, args)
     except AgentChatError as e:
@@ -581,6 +781,10 @@ def main(argv=None):
     except KeyboardInterrupt:
         print(file=sys.stderr)  # print a newline to cleanly break from input prompts
         die("cancelled by user", code=130)
+    except Exception as error:
+        if _is_task_error(error):
+            die(str(error), code=2)
+        raise
 
 
 if __name__ == "__main__":

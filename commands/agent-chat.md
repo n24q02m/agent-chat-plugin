@@ -24,6 +24,38 @@ is unset). All commands below run `python ${CLAUDE_PLUGIN_ROOT}/chat.py <cmd>`.
    this blocks in-process (sleep-poll) and burns zero model tokens while
    idle, then prints the new message(s) when they arrive.
 
+
+Structured task board commands use the same root/channel as messages:
+
+```text
+python ${CLAUDE_PLUGIN_ROOT}/chat.py task create <channel> <task-id> \
+  --from $AGENT_CHAT_NAME --title "..."
+python ${CLAUDE_PLUGIN_ROOT}/chat.py task list <channel>
+python ${CLAUDE_PLUGIN_ROOT}/chat.py task show <channel> <task-id>
+python ${CLAUDE_PLUGIN_ROOT}/chat.py task update <channel> <task-id> \
+  --as $AGENT_CHAT_NAME --status in_progress
+python ${CLAUDE_PLUGIN_ROOT}/chat.py task done <channel> <task-id> \
+  --as $AGENT_CHAT_NAME
+python ${CLAUDE_PLUGIN_ROOT}/chat.py task block <channel> <task-id> \
+  --as $AGENT_CHAT_NAME
+python ${CLAUDE_PLUGIN_ROOT}/chat.py task release <channel> <task-id> \
+  --as $AGENT_CHAT_NAME
+```
+
+`create` starts every task as `open`; repeat `--depends-on`, `--files-hint`,
+or `--acceptance` for multiple values (comma-separated values are also
+accepted). `update` can change `--title`, `--owner`, `--depends-on`,
+`--files-hint`, `--acceptance`, `--branch`, or `--status`; nullable owner and
+branch can be cleared with `--clear-owner` and `--clear-branch`.
+
+The valid statuses are `open`, `in_progress`, `blocked`, `done`, and
+`cancelled`. A task can enter `in_progress` or `done` only if all dependency
+records are `done`; the CLI computes this from `tasks/*.json`, not message
+body text. Invalid transitions remain rejected. Common stable failures include
+`TASK_NOT_FOUND`, `TASK_ALREADY_EXISTS`, `TASK_INVALID_UPDATE`,
+`TASK_INVALID_TRANSITION`, `TASK_DEPENDENCY_NOT_READY`,
+`TASK_UNKNOWN_DEPENDENCY`, `TASK_DEPENDENCY_CYCLE`, and `TASK_AUDIT_FAILED`.
+Task mutations are atomic and produce auditable task events in the channel.
 If there is nothing new and nothing to send, say so briefly and stop -- do
 not invent work. If you need to start a new group chat, use
 `init <channel> --members a,b --topic "..."` first.
