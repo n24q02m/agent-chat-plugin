@@ -942,5 +942,84 @@ class LeaseStoreTests(unittest.TestCase):
         self.assertEqual(task_path.read_bytes(), original_task_bytes)
         self.assertEqual(actual_path.read_bytes(), original_claim_bytes)
 
+    def test_stale_recovery_crash_rolls_back_old_claim_state(self):
+        self.create_task()
+        self.leases.claim("T-0001", "alice", lease_seconds=30)
+        previous = self.expire_claim()
+        old_task = self.tasks.show("T-0001")
+
+        def crash_audit(*args, **kwargs):
+            raise SystemExit("simulated stale recovery crash")
+
+        self.leases.tasks._post_event = crash_audit
+        with self.assertRaises(SystemExit):
+            self.leases.recover(
+                "T-0001",
+                "bob",
+                "stale handoff",
+                lease_seconds=30,
+            )
+
+        pending = LeaseStore(self.channel)
+        with self.assertRaises(LeaseError) as error:
+            pending.load("T-0001")
+        self.assertEqual(error.exception.code, "LEASE_TRANSACTION_PENDING")
+        self.leases.tasks._post_event = TaskStore._post_event.__get__(
+            self.leases.tasks, TaskStore
+        )
+        pending.recover_pending(actor="recovery")
+        self.assertEqual(self.tasks.show("T-0001"), old_task)
+        self.assertEqual(
+            json.loads(
+                (self.channel / "claims" / "T-0001.alice.json").read_text(
+                    encoding="utf-8"
+                )
+            ),
+            previous,
+        )
+        self.assertFalse(
+            (self.channel / "claims" / "T-0001.bob.json").exists()
+        )
+
+    def test_case_only_owner_recovery_is_rejected_before_journal(self):
+        self.create_task()
+        self.leases.claim("T-0001", "alice", lease_seconds=30)
+        self.expire_claim()
+
+        with self.assertRaises(LeaseError) as error:
+            self.leases.recover(
+                "T-0001",
+                "Alice",
+                "case alias",
+                lease_seconds=30,
+            )
+        self.assertEqual(error.exception.code, "LEASE_INVALID_OWNER")
+        self.assertFalse(self.leases.transaction_path.exists())
+
+    def test_published_phase_failure_does_not_rollback_durable_audit(self):
+        self.create_task()
+        original_set_phase = self.leases._set_transaction_phase
+
+        def fail_published(phase):
+            if phase == "published":
+                raise OSError("injected published phase failure")
+            original_set_phase(phase)
+
+        self.leases._set_transaction_phase = fail_published
+        with self.assertRaises(LeaseError) as error:
+            self.leases.claim("T-0001", "alice", lease_seconds=30)
+        self.assertEqual(error.exception.code, "LEASE_TRANSACTION_CLEANUP_FAILED")
+        self.assertEqual(self.tasks.show("T-0001").owner, "alice")
+        self.assertEqual(len(list((self.channel / "claims").glob("T-0001.*.json"))), 1)
+        self.assertTrue(self.leases.transaction_path.exists())
+
+        self.leases._set_transaction_phase = original_set_phase
+        pending = LeaseStore(self.channel)
+        pending.recover_pending(actor="recovery")
+        self.assertEqual(self.tasks.show("T-0001").owner, "alice")
+        self.assertEqual(self.tasks.show("T-0001").status, "in_progress")
+        self.assertEqual(len(list((self.channel / "claims").glob("T-0001.*.json"))), 1)
+        self.assertFalse(self.leases.transaction_path.exists())
+
 if __name__ == "__main__":
     unittest.main()

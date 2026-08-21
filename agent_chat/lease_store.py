@@ -811,6 +811,18 @@ class LeaseStore:
             ).encode("utf-8"),
         )
 
+    def _audit_event_exists(self, event: str, task_id: str) -> bool:
+        event_marker = f'"event": "{event}"'
+        task_marker = f'"task_id": "{task_id}"'
+        for path in chat.message_files(self.channel):
+            try:
+                body = path.read_text(encoding="utf-8")
+            except (OSError, UnicodeDecodeError):
+                continue
+            if event_marker in body and task_marker in body:
+                return True
+        return False
+
     def recover_pending(self, *, actor: str = "recovery") -> None:
         """Rollback a crashed lease transaction after an explicit request."""
 
@@ -935,6 +947,7 @@ class LeaseStore:
                         )
                     decoded_after = self.tasks.validate(task_after_json)
                 next_records: list[LeaseRecord] = []
+                previous_records: list[LeaseRecord] = []
                 for change in pending.get("claim_changes", []):
                     if not isinstance(change, dict) or "file" not in change:
                         raise LeaseError(
@@ -995,18 +1008,8 @@ class LeaseStore:
                         filename=filename,
                         field="next",
                     )
-                    self._assert_claim_task_pair(
-                        previous_record,
-                        decoded_task,
-                        field="previous",
-                        filename=filename,
-                    )
-                    self._assert_claim_task_pair(
-                        next_record,
-                        decoded_after if decoded_after is not None else decoded_after_task,
-                        field="next",
-                        filename=filename,
-                    )
+                    if previous_record is not None:
+                        previous_records.append(previous_record)
                     if previous is None and next_payload is None:
                         raise LeaseError(
                             "LEASE_TRANSACTION_INVALID",
@@ -1017,6 +1020,32 @@ class LeaseStore:
                         next_records.append(next_record)
                     claim_rollbacks.append(
                         (claim_path, previous, next_payload, next_record)
+                    )
+                if len(previous_records) > 1:
+                    raise LeaseError(
+                        "LEASE_TRANSACTION_INVALID",
+                        "transaction has multiple active previous claims",
+                    )
+                if decoded_task.owner is not None and decoded_task.lease_expires_at is not None:
+                    if not previous_records:
+                        raise LeaseError(
+                            "LEASE_TRANSACTION_INVALID",
+                            "task_before lease metadata has no previous claim",
+                        )
+                    previous_record = previous_records[0]
+                    if (
+                        previous_record.owner != decoded_task.owner
+                        or previous_record.lease_expires_at
+                        != decoded_task.lease_expires_at
+                    ):
+                        raise LeaseError(
+                            "LEASE_TRANSACTION_INVALID",
+                            "task_before lease metadata does not match previous claim",
+                        )
+                elif previous_records:
+                    raise LeaseError(
+                        "LEASE_TRANSACTION_INVALID",
+                        "previous claim exists without task_before lease metadata",
                     )
                 if decoded_after is not None:
                     if len(next_records) > 1:
@@ -1049,6 +1078,11 @@ class LeaseStore:
                         "LEASE_TRANSACTION_INVALID",
                         f"unsupported transaction phase: {phase!r}",
                     )
+                if phase == "applied" and self._audit_event_exists(
+                    pending["event"],
+                    pending["task_id"],
+                ):
+                    phase = "published"
                 if phase == "published":
                     current_after = self.tasks._read_path(task_path)
                     if current_after.to_dict() != decoded_after_task.to_dict():
@@ -1623,6 +1657,17 @@ class LeaseStore:
             )
             old_previous = old_path.read_bytes()
             new_path = self._claim_path(task_id, owner)
+            if (
+                old_path.name.casefold() == new_path.name.casefold()
+                and old_path.name != new_path.name
+            ):
+                raise LeaseError(
+                    "LEASE_INVALID_OWNER",
+                    "case-only owner changes are not supported for lease recovery",
+                    task_id=task_id,
+                    current_owner=existing.owner,
+                    requested_owner=owner,
+                )
             new_previous = new_path.read_bytes() if new_path.exists() else None
             return self._run_transaction(
                 task_path=task_path,
