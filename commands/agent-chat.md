@@ -49,13 +49,27 @@ accepted). `update` can change `--title`, `--owner`, `--depends-on`,
 branch can be cleared with `--clear-owner` and `--clear-branch`.
 
 The valid statuses are `open`, `in_progress`, `blocked`, `done`, and
-`cancelled`. A task can enter `in_progress` or `done` only if all dependency
-records are `done`; the CLI computes this from `tasks/*.json`, not message
-body text. Invalid transitions remain rejected. Common stable failures include
-`TASK_NOT_FOUND`, `TASK_ALREADY_EXISTS`, `TASK_INVALID_UPDATE`,
-`TASK_INVALID_TRANSITION`, `TASK_DEPENDENCY_NOT_READY`,
-`TASK_UNKNOWN_DEPENDENCY`, `TASK_DEPENDENCY_CYCLE`, and `TASK_AUDIT_FAILED`.
-Task mutations are atomic and produce auditable task events in the channel.
+`cancelled`. `done` is terminal. `task done` requires `in_progress`;
+`task block` accepts `open` or `in_progress`; and `task release` accepts
+`blocked` or `in_progress`. A task can enter `in_progress` or `done` only if
+all dependency records are `done`; the CLI computes this from `tasks/*.json`,
+not message body text. Invalid transitions remain rejected.
+
+Successful commands have deterministic output, for example:
+
+```text
+created task T-0001 [open]
+T-0001  open  -  -  Document the review flow
+dependencies: ready
+```
+
+Task failures exit nonzero and include a stable code. Common failures include
+`TASK_CHANNEL_NOT_FOUND`, `TASK_NOT_FOUND`, `TASK_ALREADY_EXISTS`,
+`TASK_INVALID_STATUS`, `TASK_INVALID_UPDATE`, `TASK_INVALID_TRANSITION`,
+`TASK_DEPENDENCY_NOT_READY`, `TASK_UNKNOWN_DEPENDENCY`,
+`TASK_DEPENDENCY_CYCLE`, `TASK_PATH_OUTSIDE_WORKSPACE`,
+`TASK_LOCK_TIMEOUT`, and `TASK_AUDIT_FAILED`. Task mutations are atomic and
+produce auditable task events in the channel.
 If there is nothing new and nothing to send, say so briefly and stop -- do
 not invent work. If you need to start a new group chat, use
 `init <channel> --members a,b --topic "..."` first.
