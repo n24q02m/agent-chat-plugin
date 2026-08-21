@@ -186,6 +186,17 @@ class LeaseStoreTests(unittest.TestCase):
         self.assertEqual(claimed.owner, "alice")
         self.assertEqual(claimed.status, "in_progress")
 
+    def test_preassigned_owner_without_lease_remains_task_metadata(self):
+        self.create_task(owner="alice")
+
+        updated = self.tasks.update(
+            "T-0001",
+            {"title": "Updated before first claim"},
+            actor="alice",
+        )
+
+        self.assertEqual(updated.owner, "alice")
+        self.assertIsNone(updated.lease_expires_at)
     def test_stale_recovery_by_same_owner_keeps_one_claim_record(self):
         self.create_task()
         self.leases.claim("T-0001", "alice", lease_seconds=30)

@@ -361,10 +361,10 @@ class LeaseStore:
         claim: tuple[Path, LeaseRecord] | None,
     ) -> None:
         if claim is None:
-            if task.owner is not None or task.lease_expires_at is not None:
+            if task.lease_expires_at is not None:
                 raise LeaseError(
                     "LEASE_INCONSISTENT",
-                    f"task {task.id} has lease fields without an active claim record",
+                    f"task {task.id} has a lease expiry without an active claim record",
                     task_id=task.id,
                     owner=task.owner,
                     lease_expires_at=task.lease_expires_at,
