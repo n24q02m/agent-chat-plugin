@@ -69,24 +69,32 @@ def _error(code: str, message: str, **details: Any) -> TaskValidationError:
     return TaskValidationError(code, message, **details)
 
 
-def _require_text(value: Any, field: str, *, allow_empty: bool = False) -> str:
+def _require_text(
+    value: Any,
+    field: str,
+    *,
+    allow_empty: bool = False,
+    code: str | None = None,
+) -> str:
+    error_code = code or f"TASK_INVALID_{field.upper()}"
     if not isinstance(value, str):
-        raise _error(f"TASK_INVALID_{field.upper()}", f"{field} must be a string")
+        raise _error(error_code, f"{field} must be a string")
     if not allow_empty and not value.strip():
-        raise _error(f"TASK_INVALID_{field.upper()}", f"{field} must not be empty")
+        raise _error(error_code, f"{field} must not be empty")
     if "\x00" in value or "\r" in value or "\n" in value:
         raise _error(
-            f"TASK_INVALID_{field.upper()}",
+            error_code,
             f"{field} contains a forbidden control character",
         )
     return value
 
 
 def _validate_id(value: Any, field: str = "id") -> str:
-    value = _require_text(value, field)
+    code = "TASK_INVALID_ID" if field == "id" else "TASK_INVALID_DEPENDENCY_ID"
+    value = _require_text(value, field, code=code)
     if not _TASK_ID_RE.fullmatch(value):
         raise _error(
-            "TASK_INVALID_ID" if field == "id" else "TASK_INVALID_DEPENDENCY_ID",
+            code,
             f"{field} must contain only letters, digits, '.', '_' or '-'",
         )
     return value
@@ -159,7 +167,13 @@ def validate_workspace_path(path: Any, workspace: Path | None = None) -> str:
     return path
 
 
-def _validate_list_of_text(value: Any, field: str, *, paths: bool = False, workspace: Path | None = None) -> list[str]:
+def _validate_list_of_text(
+    value: Any,
+    field: str,
+    *,
+    paths: bool = False,
+    workspace: Path | None = None,
+) -> list[str]:
     if not isinstance(value, list):
         raise _error(f"TASK_INVALID_{field.upper()}", f"{field} must be a JSON array")
     result: list[str] = []
@@ -167,7 +181,14 @@ def _validate_list_of_text(value: Any, field: str, *, paths: bool = False, works
         if paths:
             result.append(validate_workspace_path(item, workspace))
         else:
-            result.append(_require_text(item, field + " item", allow_empty=False))
+            result.append(
+                _require_text(
+                    item,
+                    field + " item",
+                    allow_empty=False,
+                    code=f"TASK_INVALID_{field.upper()}",
+                )
+            )
     return result
 
 

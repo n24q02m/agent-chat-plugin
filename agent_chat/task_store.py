@@ -9,9 +9,11 @@ from __future__ import annotations
 import json
 import os
 import tempfile
+import time
+from contextlib import contextmanager
 from pathlib import Path
 from types import SimpleNamespace
-from typing import Any, Mapping
+from typing import Any, Iterator, Mapping
 
 import chat
 
@@ -31,8 +33,17 @@ TASK_DIRNAME = "tasks"
 class TaskStore:
     """Read and mutate authoritative task records below one channel folder."""
 
-    def __init__(self, channel: Path | str):
+    def __init__(
+        self,
+        channel: Path | str,
+        root: Path | str | None = None,
+    ):
         self.channel = Path(channel)
+        configured_root = root
+        if configured_root is None:
+            configured_root = os.environ.get("AGENT_CHAT_ROOT")
+        self.root = Path(configured_root) if configured_root else self.channel.parent
+        self._assert_inside_root(self.channel)
         if not self.channel.is_dir() or not (self.channel / "_meta.json").is_file():
             raise TaskValidationError(
                 "TASK_CHANNEL_NOT_FOUND",
@@ -43,6 +54,15 @@ class TaskStore:
     @property
     def tasks_dir(self) -> Path:
         return self.channel / TASK_DIRNAME
+
+    def _assert_inside_root(self, path: Path) -> None:
+        try:
+            path.resolve(strict=False).relative_to(self.root.resolve(strict=False))
+        except (OSError, RuntimeError, ValueError):
+            raise TaskValidationError(
+                "TASK_PATH_OUTSIDE_WORKSPACE",
+                f"channel path escapes configured root: {path}",
+            )
 
     def _assert_inside_channel(self, path: Path) -> None:
         try:
@@ -63,6 +83,48 @@ class TaskStore:
         self.tasks_dir.mkdir(parents=True, exist_ok=True)
         return self.tasks_dir
 
+    def _acquire_mutation_lock(
+        self, timeout: float = 10.0, stale: float = 30.0
+    ) -> Path:
+        lock = self.channel / "_tasks.lock"
+        self._assert_inside_channel(lock)
+        started = time.monotonic()
+        while True:
+            try:
+                os.mkdir(lock)
+                return lock
+            except FileExistsError:
+                try:
+                    if time.time() - lock.stat().st_mtime > stale:
+                        try:
+                            os.rmdir(lock)
+                        except OSError:
+                            pass
+                        continue
+                except FileNotFoundError:
+                    continue
+                if time.monotonic() - started > timeout:
+                    raise TaskValidationError(
+                        "TASK_LOCK_TIMEOUT",
+                        "could not acquire task mutation lock",
+                    )
+                time.sleep(0.01)
+
+    @staticmethod
+    def _release_mutation_lock(lock: Path) -> None:
+        try:
+            os.rmdir(lock)
+        except OSError:
+            pass
+
+    @contextmanager
+    def _mutation_lock(self) -> Iterator[None]:
+        lock = self._acquire_mutation_lock()
+        try:
+            yield
+        finally:
+            self._release_mutation_lock(lock)
+
     def _task_path(self, task_id: str) -> Path:
         if (
             not isinstance(task_id, str)
@@ -81,6 +143,7 @@ class TaskStore:
         return path
 
     def _read_path(self, path: Path) -> TaskRecord:
+        self._assert_inside_channel(path)
         try:
             with path.open("r", encoding="utf-8") as stream:
                 raw = json.load(stream)
@@ -118,7 +181,13 @@ class TaskStore:
         for path in sorted(self.tasks_dir.glob("*.json"), key=lambda item: item.name):
             if path.name.startswith((".", "_")):
                 continue
+            self._assert_inside_channel(path)
             records.append(self._read_path(path))
+        return records
+
+    def _read_snapshot(self) -> list[TaskRecord]:
+        records = self._read_all()
+        self._validate_graph(records)
         return records
 
     @staticmethod
@@ -171,12 +240,6 @@ class TaskStore:
             )
         return task
 
-    def _lock(self) -> Path:
-        return chat._acquire_lock(self.channel)
-
-    @staticmethod
-    def _unlock(lock: Path) -> None:
-        chat._release_lock(lock)
 
     @staticmethod
     def _fsync_directory(directory: Path) -> None:
@@ -271,11 +334,14 @@ class TaskStore:
                 task_id=task.id,
             )
 
-    def create(self, task: TaskRecord | Mapping[str, Any], actor: str | None = None) -> TaskRecord:
+    def create(
+        self,
+        task: TaskRecord | Mapping[str, Any],
+        actor: str | None = None,
+    ) -> TaskRecord:
         candidate = self.validate(task)
         path = self._task_path(candidate.id)
-        lock = self._lock()
-        try:
+        with self._mutation_lock():
             if path.exists():
                 raise TaskValidationError(
                     "TASK_ALREADY_EXISTS",
@@ -286,21 +352,43 @@ class TaskStore:
             self._validate_graph(records + [candidate])
             self._ensure_tasks_dir()
             self._atomic_write(path, candidate)
-        finally:
-            self._unlock(lock)
-        self._post_event("task.created", candidate, actor=actor)
+            try:
+                self._post_event("task.created", candidate, actor=actor)
+            except Exception as error:
+                try:
+                    path.unlink()
+                    self._fsync_directory(path.parent)
+                except Exception as rollback_error:
+                    raise TaskError(
+                        "TASK_AUDIT_ROLLBACK_FAILED",
+                        f"could not roll back task create: {rollback_error}",
+                        task_id=candidate.id,
+                    ) from rollback_error
+                if isinstance(error, TaskError):
+                    raise
+                raise TaskError(
+                    "TASK_AUDIT_FAILED",
+                    f"task create audit failed: {error}",
+                    task_id=candidate.id,
+                ) from error
         return candidate
 
     def load(self, task_id: str) -> TaskRecord:
-        return self._read_path(self._task_path(task_id))
+        path = self._task_path(task_id)
+        with self._mutation_lock():
+            for record in self._read_snapshot():
+                if record.id == path.stem:
+                    return record
+        raise TaskValidationError(
+            "TASK_NOT_FOUND", f"task record does not exist: {task_id}"
+        )
 
     def show(self, task_id: str) -> TaskRecord:
         return self.load(task_id)
 
     def list(self) -> list[TaskRecord]:
-        records = self._read_all()
-        self._validate_graph(records)
-        return records
+        with self._mutation_lock():
+            return self._read_snapshot()
 
     def update(
         self,
@@ -327,8 +415,7 @@ class TaskStore:
             )
         updates.update(fields)
 
-        lock = self._lock()
-        try:
+        with self._mutation_lock():
             current = self._read_path(path)
             if "id" in updates and updates["id"] != current.id:
                 raise TaskValidationError(
@@ -345,12 +432,34 @@ class TaskStore:
             candidate = self.validate(merged)
             validate_transition(current.status, candidate.status)
             records = self._read_all()
-            replaced = [candidate if record.id == task_id else record for record in records]
+            replaced = [
+                candidate if record.id == task_id else record for record in records
+            ]
             self._validate_graph(replaced)
             self._atomic_write(path, candidate)
-        finally:
-            self._unlock(lock)
-        self._post_event("task.updated", candidate, actor=actor, previous=current)
+            try:
+                self._post_event(
+                    "task.updated",
+                    candidate,
+                    actor=actor,
+                    previous=current,
+                )
+            except Exception as error:
+                try:
+                    self._atomic_write(path, current)
+                except Exception as rollback_error:
+                    raise TaskError(
+                        "TASK_AUDIT_ROLLBACK_FAILED",
+                        f"could not roll back task update: {rollback_error}",
+                        task_id=candidate.id,
+                    ) from rollback_error
+                if isinstance(error, TaskError):
+                    raise
+                raise TaskError(
+                    "TASK_AUDIT_FAILED",
+                    f"task update audit failed: {error}",
+                    task_id=candidate.id,
+                ) from error
         return candidate
 
 
@@ -360,20 +469,36 @@ def create_task(
     channel: Path | str,
     task: TaskRecord | Mapping[str, Any],
     actor: str | None = None,
+    *,
+    root: Path | str | None = None,
 ) -> TaskRecord:
-    return TaskStore(channel).create(task, actor=actor)
+    return TaskStore(channel, root=root).create(task, actor=actor)
 
 
-def load_task(channel: Path | str, task_id: str) -> TaskRecord:
-    return TaskStore(channel).load(task_id)
+def load_task(
+    channel: Path | str,
+    task_id: str,
+    *,
+    root: Path | str | None = None,
+) -> TaskRecord:
+    return TaskStore(channel, root=root).load(task_id)
 
 
-def show_task(channel: Path | str, task_id: str) -> TaskRecord:
-    return TaskStore(channel).show(task_id)
+def show_task(
+    channel: Path | str,
+    task_id: str,
+    *,
+    root: Path | str | None = None,
+) -> TaskRecord:
+    return TaskStore(channel, root=root).show(task_id)
 
 
-def list_tasks(channel: Path | str) -> list[TaskRecord]:
-    return TaskStore(channel).list()
+def list_tasks(
+    channel: Path | str,
+    *,
+    root: Path | str | None = None,
+) -> list[TaskRecord]:
+    return TaskStore(channel, root=root).list()
 
 
 def update_task(
@@ -381,9 +506,13 @@ def update_task(
     task_id: str,
     changes: Mapping[str, Any] | TaskRecord | None = None,
     actor: str | None = None,
+    *,
+    root: Path | str | None = None,
     **fields: Any,
 ) -> TaskRecord:
-    return TaskStore(channel).update(task_id, changes, actor=actor, **fields)
+    return TaskStore(channel, root=root).update(
+        task_id, changes, actor=actor, **fields
+    )
 
 
 __all__ = [

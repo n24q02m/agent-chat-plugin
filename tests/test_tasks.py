@@ -1,6 +1,7 @@
 """Focused Task 2 tests for the typed task model and atomic store."""
 
 import json
+import threading
 import tempfile
 import unittest
 from pathlib import Path
@@ -9,6 +10,7 @@ from types import SimpleNamespace
 import chat
 from agent_chat.task_model import (
     TASK_FIELDS,
+    TaskError,
     TaskRecord,
     TaskValidationError,
 )
@@ -156,6 +158,179 @@ class TaskStoreTests(unittest.TestCase):
         finally:
             link.unlink(missing_ok=True)
             outside.rmdir()
+
+    def test_list_rejects_task_record_symlink_outside_channel(self):
+        tasks = self.channel / "tasks"
+        tasks.mkdir()
+        outside = Path(self.temp_dir.name).parent / (self.root.name + "-records")
+        outside.mkdir()
+        external_record = outside / "T-0001.json"
+        external_record.write_text(
+            json.dumps(self.task_data()), encoding="utf-8"
+        )
+        link = tasks / "T-0001.json"
+        try:
+            link.symlink_to(external_record)
+        except (OSError, NotImplementedError):
+            self.skipTest("symlink creation is unavailable on this platform")
+        try:
+            with self.assertRaises(TaskValidationError) as error:
+                self.store.list()
+            self.assertEqual(
+                error.exception.code, "TASK_PATH_OUTSIDE_WORKSPACE"
+            )
+        finally:
+            link.unlink(missing_ok=True)
+            external_record.unlink(missing_ok=True)
+            outside.rmdir()
+
+    def test_store_enforces_explicit_root_boundary_and_channel_symlink(self):
+        outside_root = Path(self.temp_dir.name).parent / (self.root.name + "-root")
+        outside_root.mkdir()
+        chat.cmd_init(
+            outside_root,
+            SimpleNamespace(channel="outside", members=None, topic=None),
+        )
+        outside_channel = outside_root / "outside"
+        with self.assertRaises(TaskValidationError) as error:
+            TaskStore(outside_channel, root=self.root)
+        self.assertEqual(error.exception.code, "TASK_PATH_OUTSIDE_WORKSPACE")
+
+        linked_channel = self.root / "linked"
+        try:
+            linked_channel.symlink_to(outside_channel, target_is_directory=True)
+        except (OSError, NotImplementedError):
+            self.skipTest("symlink creation is unavailable on this platform")
+        try:
+            with self.assertRaises(TaskValidationError) as error:
+                TaskStore(linked_channel, root=self.root)
+            self.assertEqual(
+                error.exception.code, "TASK_PATH_OUTSIDE_WORKSPACE"
+            )
+        finally:
+            linked_channel.unlink(missing_ok=True)
+            (outside_channel / "_meta.json").unlink(missing_ok=True)
+            (outside_channel / ".cursors").rmdir()
+            outside_channel.rmdir()
+            outside_root.rmdir()
+
+    def test_load_and_show_validate_persisted_dependency_graph(self):
+        tasks = self.channel / "tasks"
+        tasks.mkdir()
+        first = self.task_data(id="T-0001", depends_on=["T-0002"])
+        second = self.task_data(id="T-0002", depends_on=["T-0001"])
+        (tasks / "T-0001.json").write_text(
+            json.dumps(first), encoding="utf-8"
+        )
+        (tasks / "T-0002.json").write_text(
+            json.dumps(second), encoding="utf-8"
+        )
+
+        for loader in (self.store.load, self.store.show):
+            with self.subTest(loader=loader.__name__):
+                with self.assertRaises(TaskValidationError) as error:
+                    loader("T-0001")
+                self.assertEqual(
+                    error.exception.code, "TASK_DEPENDENCY_CYCLE"
+                )
+
+    def test_load_rejects_persisted_unknown_dependency(self):
+        tasks = self.channel / "tasks"
+        tasks.mkdir()
+        record = self.task_data(depends_on=["T-9999"])
+        (tasks / "T-0001.json").write_text(
+            json.dumps(record), encoding="utf-8"
+        )
+
+        for loader in (self.store.load, self.store.show):
+            with self.subTest(loader=loader.__name__):
+                with self.assertRaises(TaskValidationError) as error:
+                    loader("T-0001")
+                self.assertEqual(
+                    error.exception.code, "TASK_UNKNOWN_DEPENDENCY"
+                )
+
+    def test_nested_validation_uses_canonical_error_codes(self):
+        with self.assertRaises(TaskValidationError) as acceptance_error:
+            TaskRecord.from_dict(self.task_data(acceptance=[123]))
+        self.assertEqual(
+            acceptance_error.exception.code, "TASK_INVALID_ACCEPTANCE"
+        )
+
+        with self.assertRaises(TaskValidationError) as dependency_error:
+            TaskRecord.from_dict(self.task_data(depends_on=[123]))
+        self.assertEqual(
+            dependency_error.exception.code, "TASK_INVALID_DEPENDENCY_ID"
+        )
+
+    def test_audit_failure_rolls_back_create_and_update(self):
+        def fail_audit(*args, **kwargs):
+            raise TaskError("TASK_AUDIT_FAILED", "injected audit failure")
+
+        self.store._post_event = fail_audit
+        with self.assertRaises(TaskError) as create_error:
+            self.store.create(self.make_task(), actor="alice")
+        self.assertEqual(create_error.exception.code, "TASK_AUDIT_FAILED")
+        self.assertFalse((self.channel / "tasks" / "T-0001.json").exists())
+
+        self.store._post_event = TaskStore._post_event.__get__(
+            self.store, TaskStore
+        )
+        self.store.create(self.make_task(), actor="alice")
+        self.store._post_event = fail_audit
+        with self.assertRaises(TaskError) as update_error:
+            self.store.update("T-0001", actor="alice", status="in_progress")
+        self.assertEqual(update_error.exception.code, "TASK_AUDIT_FAILED")
+        self.assertEqual(self.store.show("T-0001").status, "open")
+
+    def test_updates_serialize_authoritative_write_and_audit_event(self):
+        self.store.create(self.make_task(), actor="alice")
+        first_started = threading.Event()
+        release_first = threading.Event()
+        second_finished = threading.Event()
+        observed_statuses = []
+        first_errors = []
+        second_errors = []
+
+        def ordered_event(event, task, **kwargs):
+            if task.status == "in_progress":
+                first_started.set()
+                release_first.wait(2)
+            observed_statuses.append(task.status)
+
+        self.store._post_event = ordered_event
+
+        def first_update():
+            try:
+                self.store.update(
+                    "T-0001", actor="alice", status="in_progress"
+                )
+            except BaseException as error:
+                first_errors.append(error)
+
+        def second_update():
+            try:
+                self.store.update("T-0001", actor="alice", status="blocked")
+            except BaseException as error:
+                second_errors.append(error)
+            finally:
+                second_finished.set()
+
+        first_thread = threading.Thread(target=first_update)
+        second_thread = threading.Thread(target=second_update)
+        first_thread.start()
+        self.assertTrue(first_started.wait(2))
+        second_thread.start()
+        try:
+            self.assertFalse(second_finished.wait(0.2))
+        finally:
+            release_first.set()
+            first_thread.join(2)
+            second_thread.join(2)
+
+        self.assertEqual(first_errors, [])
+        self.assertEqual(second_errors, [])
+        self.assertEqual(observed_statuses, ["in_progress", "blocked"])
 
     def test_create_collision_is_deterministic_and_preserves_existing_record(self):
         original = self.store.create(self.make_task(), actor="alice")
