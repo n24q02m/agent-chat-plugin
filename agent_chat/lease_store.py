@@ -214,6 +214,25 @@ class LeaseStore:
                 "LEASE_PATH_OUTSIDE_WORKSPACE",
                 f"lease storage path escapes channel workspace: {path}",
             )
+    def _assert_exact_layout(
+        self,
+        path: Path,
+        directory: Path,
+        *,
+        kind: str,
+    ) -> None:
+        self._assert_inside_channel(path)
+        try:
+            resolved_directory = directory.resolve(strict=False)
+            resolved_path = path.resolve(strict=False)
+            if resolved_path.parent != resolved_directory:
+                raise ValueError
+        except (OSError, RuntimeError, ValueError):
+            raise LeaseError(
+                "LEASE_PATH_OUTSIDE_WORKSPACE",
+                f"{kind} path is outside its channel layout: {path}",
+                path=str(path),
+            )
 
     def _ensure_claims_dir(self) -> Path:
         self._assert_inside_channel(self.claims_dir)
@@ -281,6 +300,14 @@ class LeaseStore:
                 path=str(path),
             )
         record = LeaseRecord.from_dict(raw)
+        if record.channel != self.channel.name:
+            raise LeaseError(
+                "LEASE_INCONSISTENT",
+                f"lease channel {record.channel!r} does not match {self.channel.name!r}",
+                expected_channel=self.channel.name,
+                actual_channel=record.channel,
+                path=str(path),
+            )
         expected = path.parent / f"{record.task_id}.{record.owner}.json"
         if expected != path:
             raise LeaseError(
@@ -652,23 +679,84 @@ class LeaseStore:
                     "no pending lease transaction exists",
                 )
             try:
-                task_path = self.channel / pending["task_file"]
+                raw_task_file = pending.get("task_file")
+                if not isinstance(raw_task_file, str) or not raw_task_file:
+                    raise LeaseError(
+                        "LEASE_TRANSACTION_INVALID",
+                        "transaction journal has an invalid task_file",
+                    )
+                portable = raw_task_file.replace("\\", "/")
+                parts = portable.split("/")
+                if (
+                    len(parts) != 2
+                    or parts[0] != "tasks"
+                    or not parts[1].endswith(".json")
+                ):
+                    raise LeaseError(
+                        "LEASE_TRANSACTION_INVALID",
+                        f"transaction journal task path outside tasks layout: {raw_task_file}",
+                    )
+                expected_task_id = parts[1][:-5]
+                _validate_identity(
+                    expected_task_id, "task_id", "LEASE_INVALID_TASK_ID"
+                )
+                if expected_task_id != pending.get("task_id"):
+                    raise LeaseError(
+                        "LEASE_TRANSACTION_INVALID",
+                        "transaction task_id does not match task_file stem",
+                    )
+                task_path = self.channel / parts[0] / parts[1]
                 self._assert_inside_channel(task_path)
-                task_before = self._decode_bytes(pending["task_before"])
+                task_before = self._decode_bytes(pending.get("task_before"))
                 if task_before is None:
                     raise LeaseError(
                         "LEASE_TRANSACTION_INVALID",
                         "transaction journal has no task rollback bytes",
                     )
-                self._atomic_write_bytes(task_path, task_before)
-                for change in reversed(pending["claim_changes"]):
+                try:
+                    decoded_json = json.loads(task_before.decode("utf-8"))
+                except (UnicodeDecodeError, json.JSONDecodeError) as decode_error:
+                    raise LeaseError(
+                        "LEASE_TRANSACTION_INVALID",
+                        f"transaction journal task_before is not valid JSON: {decode_error}",
+                    ) from decode_error
+                if (
+                    not isinstance(decoded_json, dict)
+                    or decoded_json.get("id") != expected_task_id
+                ):
+                    raise LeaseError(
+                        "LEASE_TRANSACTION_INVALID",
+                        "transaction journal task_before id does not match task record",
+                    )
+                decoded_task = self.tasks.validate(decoded_json)
+                if decoded_task.id != expected_task_id:
+                    raise LeaseError(
+                        "LEASE_TRANSACTION_INVALID",
+                        "transaction journal task_before record mismatch",
+                    )
+                for change in pending.get("claim_changes", []):
                     if not isinstance(change, dict) or "file" not in change:
                         raise LeaseError(
                             "LEASE_TRANSACTION_INVALID",
                             "transaction journal claim change is malformed",
                         )
-                    claim_path = self.claims_dir / change["file"]
+                    filename = change["file"]
+                    if (
+                        not isinstance(filename, str)
+                        or "/" in filename
+                        or "\\" in filename
+                        or not filename.endswith(".json")
+                        or filename.startswith((".", "_"))
+                    ):
+                        raise LeaseError(
+                            "LEASE_TRANSACTION_INVALID",
+                            f"claim change filename outside claims layout: {filename!r}",
+                        )
+                    claim_path = self.claims_dir / filename
                     self._assert_inside_channel(claim_path)
+                self._atomic_write_bytes(task_path, task_before)
+                for change in reversed(pending["claim_changes"]):
+                    claim_path = self.claims_dir / change["file"]
                     self._restore_claim(
                         claim_path,
                         self._decode_bytes(change.get("previous")),
@@ -779,6 +867,7 @@ class LeaseStore:
             task_path, current, records = self._read_task_locked(task_id)
             claim = self._current_claim(task_id)
             if claim is not None:
+                self._assert_consistent(current, claim)
                 _, existing = claim
                 current_now = self._now(now)
                 if _is_expired(existing.lease_expires_at, current_now):

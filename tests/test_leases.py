@@ -410,6 +410,7 @@ class LeaseStoreTests(unittest.TestCase):
         self.leases.claim("T-0001", "alice", lease_seconds=30)
     def test_unleased_preassigned_owner_keeps_task3_done_and_release_behavior(self):
         self.create_task(owner="alice")
+        self.tasks.update("T-0001", actor="alice", status="in_progress")
         completed = self.leases.complete_or_done("T-0001", "alice")
         self.assertEqual((completed.status, completed.owner), ("done", "alice"))
 
