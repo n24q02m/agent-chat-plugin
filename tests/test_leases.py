@@ -1231,37 +1231,29 @@ class LeaseStoreTests(unittest.TestCase):
         self.assertFalse(self.leases.transaction_path.exists())
         self.assertEqual(self.tasks.show("T-0001").status, "open")
 
-    def test_claim_reader_rejects_symlink_outside_claims_directory(self):
+    def test_claim_reader_rejects_windows_case_alias_directly(self):
+        if os.name != "nt":
+            self.skipTest("case-alias behavior is specific to Windows filesystems")
         self.create_task()
-        claims = self.channel / "claims"
-        claims.mkdir()
-        external = self.channel / "tasks" / "claim-record.json"
-        record = LeaseRecord(
-            task_id="T-0001",
-            channel="review",
-            owner="alice",
-            lease_expires_at=ORPHAN_EXPIRY,
-            claimed_at=TIMESTAMP,
-            updated_at=TIMESTAMP,
+        self.leases.claim("T-0001", "alice", lease_seconds=30)
+        alias = self.channel / "claims" / "T-0001.Alice.json"
+
+        with self.assertRaises(LeaseError) as error:
+            self.leases._read_claim(alias)
+        self.assertEqual(error.exception.code, "LEASE_TRANSACTION_INVALID")
+
+    def test_posix_case_distinct_task_claim_paths_remain_distinct(self):
+        if os.name == "nt":
+            self.skipTest("POSIX case-sensitive path behavior")
+        self.create_task(task_id="T-0001")
+        self.create_task(task_id="t-0001")
+        self.leases.claim("T-0001", "alice", lease_seconds=30)
+        self.leases.claim("t-0001", "alice", lease_seconds=30)
+
+        self.assertEqual(
+            sorted(path.name for path in (self.channel / "claims").glob("*.json")),
+            ["T-0001.alice.json", "t-0001.alice.json"],
         )
-        external.write_text(
-            json.dumps(record.to_dict(), indent=2) + "\n",
-            encoding="utf-8",
-        )
-        linked = claims / "T-0001.alice.json"
-        try:
-            linked.symlink_to(external)
-        except (OSError, NotImplementedError):
-            linked.unlink(missing_ok=True)
-            external.unlink(missing_ok=True)
-            self.skipTest("symlink creation is unavailable on this platform")
-        try:
-            with self.assertRaises(LeaseError) as error:
-                self.leases.list()
-            self.assertEqual(error.exception.code, "LEASE_PATH_OUTSIDE_WORKSPACE")
-        finally:
-            linked.unlink(missing_ok=True)
-            external.unlink(missing_ok=True)
 
     def test_pending_recovery_rejects_distinct_previous_claim_records(self):
         self.create_task()

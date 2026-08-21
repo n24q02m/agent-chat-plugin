@@ -239,7 +239,11 @@ class LeaseStore:
         self._assert_exact_layout(path, self.claims_dir, kind="claim")
         try:
             for entry in self.claims_dir.iterdir():
-                if entry.name.casefold() == filename.casefold() and entry.name != filename:
+                if (
+                    os.name == "nt"
+                    and entry.name.casefold() == filename.casefold()
+                    and entry.name != filename
+                ):
                     raise LeaseError(
                         "LEASE_TRANSACTION_INVALID",
                         f"claim filename case alias is not canonical: {filename!r}",
