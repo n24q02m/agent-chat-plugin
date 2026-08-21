@@ -15,7 +15,7 @@ allocated under a filesystem lock (atomic `mkdir`) so two sessions can never cla
 the same number -- the exact race that produced duplicate "seq 11" files in the
 hand-rolled prototype.
 
-Commands: init | channels | roster | post | read | wait | peek | claim | task
+Commands: init | channels | roster | post | read | wait | peek | claim | lock | check | unlock | recover | task
 Run `python chat.py <command> --help` for flags.
 """
 
@@ -529,7 +529,66 @@ def _lease_store(root: Path, channel: str):
         ) from error
     return LeaseStore(chan, root=root)
 
+def _path_lock_store(root: Path, channel: str):
+    from agent_chat.path_locks import PathLockStore
 
+    try:
+        chan = channel_dir(root, channel)
+    except AgentChatError as error:
+        from agent_chat.path_locks import PathLockError
+
+        raise PathLockError(
+            "PATH_LOCK_INVALID_CHANNEL",
+            f"invalid channel name: '{channel}' ({error})",
+        ) from error
+    return PathLockStore(chan, root=root)
+
+
+def cmd_lock(root: Path, a):
+    store = _path_lock_store(root, a.channel)
+    with contextlib.redirect_stdout(io.StringIO()):
+        record = store.lock(
+            a.owner,
+            a.paths,
+            lease_seconds=a.lease_seconds,
+            actor=a.owner,
+        )
+    normalized = ", ".join(path.normalized_path for path in record.paths)
+    print(f"locked {record.lock_id} -> {a.channel}/{normalized}")
+
+
+def cmd_check(root: Path, a):
+    store = _path_lock_store(root, a.channel)
+    conflicts = store.check(a.paths, owner=a.owner)
+    if not conflicts:
+        print("available")
+        return
+    for record in conflicts:
+        expiry = f" expires={record.expires_at}"
+        print(f"locked {record.lock_id} owner={record.owner}{expiry}")
+
+
+def cmd_unlock(root: Path, a):
+    store = _path_lock_store(root, a.channel)
+    with contextlib.redirect_stdout(io.StringIO()):
+        record = store.unlock(a.target, a.owner, actor=a.owner)
+    print(f"unlocked {record.lock_id} from {a.channel}")
+
+
+def cmd_path_recover(root: Path, a):
+    store = _path_lock_store(root, a.channel)
+    with contextlib.redirect_stdout(io.StringIO()):
+        record = store.recover(
+            a.target,
+            a.owner,
+            a.reason,
+            lease_seconds=a.lease_seconds,
+            actor=a.owner,
+        )
+    print(
+        f"recovered {record.lock_id} for {record.owner} "
+        f"previous_owner={record.previous_owner} reason={record.recovery_reason}"
+    )
 
 
 def _task_values(values) -> list[str]:
@@ -804,6 +863,34 @@ def build_parser() -> argparse.ArgumentParser:
     s.add_argument("task", help="task marker filename, e.g. task-12.md")
     s.add_argument("--as", dest="agent", required=True)
     s.set_defaults(func=cmd_claim)
+
+    s = sub.add_parser("lock", help="lock workspace-relative paths")
+    s.add_argument("channel")
+    s.add_argument("paths", nargs="+")
+    s.add_argument("--as", "--from", "--owner", dest="owner", required=True)
+    s.add_argument("--lease-seconds", "--lease", "--ttl", type=float, default=300.0)
+    s.set_defaults(func=cmd_lock)
+
+    s = sub.add_parser("check", help="check workspace-relative paths for conflicts")
+    s.add_argument("channel")
+    s.add_argument("paths", nargs="+")
+    s.add_argument("--as", "--from", "--owner", dest="owner")
+    s.set_defaults(func=cmd_check)
+
+    s = sub.add_parser("unlock", help="release an owned path lock")
+    s.add_argument("channel")
+    s.add_argument("target", help="lock id or exact normalized path")
+    s.add_argument("--as", "--from", "--owner", dest="owner", required=True)
+    s.set_defaults(func=cmd_unlock)
+
+    s = sub.add_parser("recover", help="recover an expired path lock explicitly")
+    s.add_argument("channel")
+    s.add_argument("target", help="lock id or exact normalized path")
+    s.add_argument("--as", "--from", "--owner", dest="owner", required=True)
+    s.add_argument("--reason", required=True)
+    s.add_argument("--lease-seconds", "--lease", "--ttl", type=float, default=300.0)
+    s.set_defaults(func=cmd_path_recover)
+
     task = sub.add_parser(
         "task",
         help="manage structured task records",
