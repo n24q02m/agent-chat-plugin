@@ -68,12 +68,13 @@ dependencies: ready
 
 Task failures exit nonzero (exit status 2) and include a stable code. Common
 failures include `TASK_INVALID_COMMAND`, `TASK_INVALID_ARGUMENT`,
-`TASK_CHANNEL_NOT_FOUND`, `TASK_NOT_FOUND`, `TASK_ALREADY_EXISTS`,
-`TASK_INVALID_STATUS`, `TASK_INVALID_UPDATE`, `TASK_INVALID_TRANSITION`,
-`TASK_DEPENDENCY_NOT_READY`, `TASK_UNKNOWN_DEPENDENCY`,
-`TASK_DEPENDENCY_CYCLE`, `TASK_PATH_OUTSIDE_WORKSPACE`,
-`TASK_LOCK_TIMEOUT`, `TASK_IO_ERROR`, and `TASK_AUDIT_FAILED`. Task mutations
-produce auditable task events in the channel.
+`TASK_INVALID_CHANNEL`, `TASK_CHANNEL_NOT_FOUND`, `TASK_NOT_FOUND`,
+`TASK_ALREADY_EXISTS`, `TASK_INVALID_STATUS`, `TASK_INVALID_UPDATE`,
+`TASK_INVALID_TRANSITION`, `TASK_DEPENDENCY_NOT_READY`,
+`TASK_UNKNOWN_DEPENDENCY`, `TASK_DEPENDENCY_CYCLE`,
+`TASK_PATH_OUTSIDE_WORKSPACE`, `TASK_LOCK_TIMEOUT`, `TASK_IO_ERROR`, and
+`TASK_AUDIT_FAILED`. Task mutations produce auditable task events in the
+channel.
 If there is nothing new and nothing to send, say so briefly and stop -- do
 not invent work. If you need to start a new group chat, use
 `init <channel> --members a,b --topic "..."` first.
