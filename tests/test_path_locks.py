@@ -404,6 +404,27 @@ class PathLockStoreTests(unittest.TestCase):
         with self.assertRaises(PathLockError) as error:
             self.store.load(record.lock_id)
         self.assertEqual(error.exception.code, "PATH_LOCK_INVALID_RECORD")
+    def test_same_byte_publish_collision_does_not_remove_preexisting_record(self):
+        record = self.store.lock("alice", ["src/same.py"], lease_seconds=60)
+        path = self.channel / "locks" / f"{record.lock_id}.json"
+        existing = path.read_bytes()
+
+        with self.assertRaises(PathLockError) as error:
+            self.store._run_transaction(
+                operation="lock",
+                event="path.locked",
+                path=path,
+                before=None,
+                after=existing,
+                actor="alice",
+                record=record,
+                apply=lambda: self.store._write_exclusive(path, record),
+            )
+
+        self.assertEqual(error.exception.code, "PATH_LOCK_CONFLICT")
+        self.assertEqual(path.read_bytes(), existing)
+        self.assertEqual(self.store.load(record.lock_id), record)
+
     def test_apply_failure_after_target_publish_rolls_back_cleanly(self):
         original_link = path_locks.os.link
 

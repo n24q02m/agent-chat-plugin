@@ -893,7 +893,7 @@ class PathLockStore:
         finally:
             os.close(fd)
 
-    def _write_exclusive(self, path: Path, record: PathLockRecord) -> None:
+    def _write_exclusive(self, path: Path, record: PathLockRecord) -> bool:
         directory = self._ensure_locks_dir()
         self._assert_inside_channel(path)
         payload = self._json_bytes(record)
@@ -931,6 +931,7 @@ class PathLockStore:
                 pass
             temporary = None
             self._fsync_directory(directory)
+            return True
         except PathLockError:
             raise
         except (OSError, UnicodeError) as error:
@@ -947,7 +948,7 @@ class PathLockStore:
                 except FileNotFoundError:
                     pass
 
-    def _write_atomic(self, path: Path, record: PathLockRecord) -> None:
+    def _write_atomic(self, path: Path, record: PathLockRecord) -> bool:
         directory = self._ensure_locks_dir()
         self._assert_inside_channel(path)
         temporary: Path | None = None
@@ -972,6 +973,7 @@ class PathLockStore:
             temporary = None
             self._revalidate_storage()
             self._fsync_directory(directory)
+            return True
         except PathLockError:
             raise
         except (OSError, UnicodeError) as error:
@@ -1333,8 +1335,8 @@ class PathLockStore:
         before: bytes | None,
         after: bytes | None,
         actor: str,
+        apply: Callable[[], bool],
         record: PathLockRecord,
-        apply: Callable[[], None],
         previous: PathLockRecord | None = None,
         details: Mapping[str, Any] | None = None,
     ) -> PathLockRecord:
@@ -1348,11 +1350,24 @@ class PathLockStore:
             actor=actor,
         )
         self._write_transaction(transaction)
-        applied = False
+        publish_succeeded = False
         audit_published = False
         try:
-            apply()
-            applied = True
+            try:
+                if path.exists():
+                    before_apply = path.read_bytes()
+                else:
+                    before_apply = None
+            except Exception as read_error:
+                raise PathLockError(
+                    "PATH_LOCK_AUDIT_ROLLBACK_FAILED",
+                    f"path lock mutation target could not be snapshotted: {read_error}",
+                    transaction_pending=True,
+                    transaction_id=transaction["transaction_id"],
+                    readback_error=str(read_error),
+                ) from read_error
+            apply_result = apply()
+            publish_succeeded = apply_result is not False
             self._set_transaction_phase("applied")
             self._post_event(
                 event,
@@ -1396,12 +1411,7 @@ class PathLockStore:
                     readback_error=str(read_error),
                 ) from read_error
 
-            if before is None:
-                has_mutated = applied or (after is not None and current_on_disk == after)
-            elif after is None:
-                has_mutated = applied or (current_on_disk != before)
-            else:
-                has_mutated = applied or (current_on_disk == after)
+            has_mutated = publish_succeeded or (current_on_disk != before_apply)
             if has_mutated:
                 try:
                     self._restore_bytes(path, before)
@@ -1616,10 +1626,11 @@ class PathLockStore:
             except (OSError, UnicodeError) as error:
                 raise _storage_error("lock read for unlock", error) from error
 
-            def apply() -> None:
+            def apply() -> bool:
                 try:
                     path.unlink()
                     self._fsync_directory(path.parent)
+                    return True
                 except (OSError, UnicodeError) as error:
                     raise _storage_error("lock removal", error) from error
 
