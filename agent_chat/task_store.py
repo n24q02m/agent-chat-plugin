@@ -486,6 +486,7 @@ class TaskStore:
         if claim is None:
             leases._assert_consistent(current, None)
             return
+        leases._assert_consistent(current, claim)
         _, record = claim
         now = leases._now()
         if _is_expired(record.lease_expires_at, now):

@@ -234,6 +234,24 @@ class LeaseStore:
                 path=str(path),
             )
 
+    def _assert_exact_claim_path(self, path: Path, filename: str) -> None:
+        self._assert_exact_layout(path, self.claims_dir, kind="claim")
+        try:
+            for entry in self.claims_dir.iterdir():
+                if entry.name.casefold() == filename.casefold() and entry.name != filename:
+                    raise LeaseError(
+                        "LEASE_TRANSACTION_INVALID",
+                        f"claim filename case alias is not canonical: {filename!r}",
+                        file=filename,
+                        actual_file=entry.name,
+                    )
+        except OSError as error:
+            raise LeaseError(
+                "LEASE_TRANSACTION_INVALID",
+                f"could not inspect claim filename: {error}",
+                file=filename,
+            ) from error
+
     def _ensure_claims_dir(self) -> Path:
         self._assert_inside_channel(self.claims_dir)
         if self.claims_dir.exists() and not self.claims_dir.is_dir():
@@ -639,6 +657,61 @@ class LeaseStore:
                 file=filename,
             )
         return decoded
+    def _claim_record_from_bytes(
+        self,
+        payload: bytes | None,
+        *,
+        filename: str,
+        field: str,
+    ) -> LeaseRecord | None:
+        if payload is None:
+            return None
+        try:
+            return LeaseRecord.from_dict(json.loads(payload.decode("utf-8")))
+        except (UnicodeDecodeError, json.JSONDecodeError) as error:
+            raise LeaseError(
+                "LEASE_TRANSACTION_INVALID",
+                f"claim {field} payload is not valid JSON: {error}",
+                file=filename,
+            ) from error
+
+    @staticmethod
+    def _assert_claim_task_pair(
+        record: LeaseRecord | None,
+        task: TaskRecord,
+        *,
+        field: str,
+        filename: str,
+    ) -> None:
+        if record is None:
+            if field == "next" and (
+                task.owner is not None or task.lease_expires_at is not None
+            ):
+                raise LeaseError(
+                    "LEASE_TRANSACTION_INVALID",
+                    f"claim {field} is absent but task retains lease metadata",
+                    file=filename,
+                )
+            if field == "previous" and task.lease_expires_at is not None:
+                raise LeaseError(
+                    "LEASE_TRANSACTION_INVALID",
+                    f"claim {field} is absent but task has a lease expiry",
+                    file=filename,
+                )
+            return
+        if (
+            record.owner != task.owner
+            or record.lease_expires_at != task.lease_expires_at
+        ):
+            raise LeaseError(
+                "LEASE_TRANSACTION_INVALID",
+                f"claim {field} owner/expiry does not match task payload",
+                file=filename,
+                task_owner=task.owner,
+                claim_owner=record.owner,
+                task_lease_expires_at=task.lease_expires_at,
+                claim_lease_expires_at=record.lease_expires_at,
+            )
 
     def _assert_no_pending_transaction(self) -> None:
         pending = self._read_transaction()
@@ -656,6 +729,7 @@ class LeaseStore:
         *,
         task_path: Path,
         current: TaskRecord,
+        candidate: TaskRecord,
         claim_changes: list[tuple[Path, bytes | None, LeaseRecord | None]],
         event: str,
         details: dict[str, Any],
@@ -664,9 +738,21 @@ class LeaseStore:
         self._ensure_claims_dir()
         payload = {
             "version": 1,
+            "phase": "prepared",
             "task_id": current.id,
             "task_file": task_path.relative_to(self.channel).as_posix(),
             "task_before": self._encode_bytes(task_path.read_bytes()),
+            "task_after": self._encode_bytes(
+                (
+                    json.dumps(
+                        candidate.to_dict(),
+                        ensure_ascii=False,
+                        indent=2,
+                        separators=(",", ": "),
+                    )
+                    + "\n"
+                ).encode("utf-8")
+            ),
             "claim_changes": [
                 {
                     "file": path.name,
@@ -699,6 +785,31 @@ class LeaseStore:
             self.tasks._fsync_directory(self.claims_dir)
         except FileNotFoundError:
             pass
+    def _set_transaction_phase(self, phase: str) -> None:
+        if phase not in {"prepared", "applied", "published"}:
+            raise LeaseError(
+                "LEASE_TRANSACTION_INVALID",
+                f"unsupported transaction phase: {phase}",
+            )
+        pending = self._read_transaction()
+        if pending is None:
+            raise LeaseError(
+                "LEASE_TRANSACTION_NOT_FOUND",
+                "cannot update a missing lease transaction",
+            )
+        pending["phase"] = phase
+        self._atomic_write_bytes(
+            self.transaction_path,
+            (
+                json.dumps(
+                    pending,
+                    ensure_ascii=False,
+                    indent=2,
+                    sort_keys=True,
+                )
+                + "\n"
+            ).encode("utf-8"),
+        )
 
     def recover_pending(self, *, actor: str = "recovery") -> None:
         """Rollback a crashed lease transaction after an explicit request."""
@@ -767,12 +878,73 @@ class LeaseStore:
                         "LEASE_TRANSACTION_INVALID",
                         "transaction journal task_before record mismatch",
                     )
-                claim_rollbacks: list[tuple[Path, bytes | None]] = []
+                task_after = self._decode_bytes(pending.get("task_after"))
+                if task_after is None:
+                    raise LeaseError(
+                        "LEASE_TRANSACTION_INVALID",
+                        "transaction journal has no task_after rollback bytes",
+                    )
+                try:
+                    decoded_after_json = json.loads(task_after.decode("utf-8"))
+                except (UnicodeDecodeError, json.JSONDecodeError) as decode_error:
+                    raise LeaseError(
+                        "LEASE_TRANSACTION_INVALID",
+                        f"transaction journal task_after is not valid JSON: {decode_error}",
+                    ) from decode_error
+                if (
+                    not isinstance(decoded_after_json, dict)
+                    or decoded_after_json.get("id") != expected_task_id
+                ):
+                    raise LeaseError(
+                        "LEASE_TRANSACTION_INVALID",
+                        "transaction journal task_after id does not match task record",
+                    )
+                decoded_after_task = self.tasks.validate(decoded_after_json)
+                if decoded_after_task.id != expected_task_id:
+                    raise LeaseError(
+                        "LEASE_TRANSACTION_INVALID",
+                        "transaction journal task_after record mismatch",
+                    )
+                claim_rollbacks: list[
+                    tuple[Path, bytes | None, bytes | None, LeaseRecord | None]
+                ] = []
+                decoded_after = None
+                if "task_after" in pending:
+                    task_after_bytes = self._decode_bytes(pending.get("task_after"))
+                    if task_after_bytes is None:
+                        raise LeaseError(
+                            "LEASE_TRANSACTION_INVALID",
+                            "transaction journal task_after is empty",
+                        )
+                    try:
+                        task_after_json = json.loads(
+                            task_after_bytes.decode("utf-8")
+                        )
+                    except (UnicodeDecodeError, json.JSONDecodeError) as error:
+                        raise LeaseError(
+                            "LEASE_TRANSACTION_INVALID",
+                            f"transaction journal task_after is not valid JSON: {error}",
+                        ) from error
+                    if (
+                        not isinstance(task_after_json, dict)
+                        or task_after_json.get("id") != expected_task_id
+                    ):
+                        raise LeaseError(
+                            "LEASE_TRANSACTION_INVALID",
+                            "transaction task_after id does not match task_file",
+                        )
+                    decoded_after = self.tasks.validate(task_after_json)
+                next_records: list[LeaseRecord] = []
                 for change in pending.get("claim_changes", []):
                     if not isinstance(change, dict) or "file" not in change:
                         raise LeaseError(
                             "LEASE_TRANSACTION_INVALID",
                             "transaction journal claim change is malformed",
+                        )
+                    if "previous" not in change or "next" not in change:
+                        raise LeaseError(
+                            "LEASE_TRANSACTION_INVALID",
+                            "transaction journal claim change requires previous and next payloads",
                         )
                     filename = change["file"]
                     if (
@@ -800,26 +972,129 @@ class LeaseStore:
                             f"claim change filename has an invalid owner: {filename!r}",
                         )
                     claim_path = self.claims_dir / filename
-                    self._assert_exact_layout(
-                        claim_path,
-                        self.claims_dir,
-                        kind="claim",
-                    )
+                    self._assert_exact_claim_path(claim_path, filename)
                     previous = self._decode_claim_rollback(
-                        change.get("previous"),
+                        change["previous"],
                         filename=filename,
                         task_id=expected_task_id,
                         field="previous",
                     )
-                    self._decode_claim_rollback(
-                        change.get("next"),
+                    next_payload = self._decode_claim_rollback(
+                        change["next"],
                         filename=filename,
                         task_id=expected_task_id,
                         field="next",
                     )
-                    claim_rollbacks.append((claim_path, previous))
+                    previous_record = self._claim_record_from_bytes(
+                        previous,
+                        filename=filename,
+                        field="previous",
+                    )
+                    next_record = self._claim_record_from_bytes(
+                        next_payload,
+                        filename=filename,
+                        field="next",
+                    )
+                    self._assert_claim_task_pair(
+                        previous_record,
+                        decoded_task,
+                        field="previous",
+                        filename=filename,
+                    )
+                    self._assert_claim_task_pair(
+                        next_record,
+                        decoded_after if decoded_after is not None else decoded_after_task,
+                        field="next",
+                        filename=filename,
+                    )
+                    if previous is None and next_payload is None:
+                        raise LeaseError(
+                            "LEASE_TRANSACTION_INVALID",
+                            "claim change must include previous or next payload",
+                            file=filename,
+                        )
+                    if next_record is not None:
+                        next_records.append(next_record)
+                    claim_rollbacks.append(
+                        (claim_path, previous, next_payload, next_record)
+                    )
+                if decoded_after is not None:
+                    if len(next_records) > 1:
+                        raise LeaseError(
+                            "LEASE_TRANSACTION_INVALID",
+                            "transaction has multiple active next claims",
+                        )
+                    if next_records:
+                        next_record = next_records[0]
+                        if (
+                            decoded_after.owner != next_record.owner
+                            or decoded_after.lease_expires_at
+                            != next_record.lease_expires_at
+                        ):
+                            raise LeaseError(
+                                "LEASE_TRANSACTION_INVALID",
+                                "task_after lease metadata does not match next claim",
+                            )
+                    elif (
+                        decoded_after.owner is not None
+                        or decoded_after.lease_expires_at is not None
+                    ):
+                        raise LeaseError(
+                            "LEASE_TRANSACTION_INVALID",
+                            "task_after retains lease metadata without a next claim",
+                        )
+                phase = pending.get("phase", "prepared")
+                if phase not in {"prepared", "applied", "published"}:
+                    raise LeaseError(
+                        "LEASE_TRANSACTION_INVALID",
+                        f"unsupported transaction phase: {phase!r}",
+                    )
+                if phase == "published":
+                    current_after = self.tasks._read_path(task_path)
+                    if current_after.to_dict() != decoded_after_task.to_dict():
+                        raise LeaseError(
+                            "LEASE_TRANSACTION_INVALID",
+                            "published transaction task does not match task_after",
+                        )
+                    for claim_path, _previous, next_payload, next_record in claim_rollbacks:
+                        if next_record is None:
+                            if claim_path.exists():
+                                raise LeaseError(
+                                    "LEASE_TRANSACTION_INVALID",
+                                    "published transaction retains a removed claim",
+                                    file=claim_path.name,
+                                )
+                        else:
+                            if not claim_path.exists():
+                                raise LeaseError(
+                                    "LEASE_TRANSACTION_INVALID",
+                                    "published transaction is missing its claim",
+                                    file=claim_path.name,
+                                )
+                            actual = self._read_claim(claim_path)
+                            if actual.to_dict() != next_record.to_dict():
+                                raise LeaseError(
+                                    "LEASE_TRANSACTION_INVALID",
+                                    "published transaction claim does not match next payload",
+                                    file=claim_path.name,
+                                )
+                    self.tasks._post_event(
+                        "lease.transaction.cleaned",
+                        current_after,
+                        actor=actor,
+                        previous=current_after,
+                        details={
+                            "transaction_event": pending["event"],
+                            "transaction_recovery": "cleanup",
+                            "transaction_task_id": pending.get("task_id"),
+                        },
+                    )
+                    self._remove_transaction()
+                    return
                 self._atomic_write_bytes(task_path, task_before)
-                for claim_path, previous in reversed(claim_rollbacks):
+                for claim_path, previous, _next_payload, _next_record in reversed(
+                    claim_rollbacks
+                ):
                     self._restore_claim(claim_path, previous)
                 restored = self.tasks._read_path(task_path)
                 self.tasks._post_event(
@@ -858,11 +1133,13 @@ class LeaseStore:
         self._write_transaction(
             task_path=task_path,
             current=current,
+            candidate=candidate,
             claim_changes=claim_changes,
             event=event,
             details=details,
         )
         task_written = False
+        audit_published = False
         try:
             self.tasks._atomic_write(task_path, candidate)
             task_written = True
@@ -878,6 +1155,7 @@ class LeaseStore:
                     self._write_claim(path, record)
                 else:
                     self._write_claim_exclusive(path, record)
+            self._set_transaction_phase("applied")
             self.tasks._post_event(
                 event,
                 candidate,
@@ -885,8 +1163,32 @@ class LeaseStore:
                 previous=current,
                 details=details,
             )
-            self._remove_transaction()
+            audit_published = True
+            self._set_transaction_phase("published")
+            try:
+                self._remove_transaction()
+            except Exception as cleanup_error:
+                raise LeaseError(
+                    "LEASE_TRANSACTION_CLEANUP_FAILED",
+                    f"lease mutation committed but journal cleanup failed: {cleanup_error}",
+                    task_id=current.id,
+                    event=event,
+                    transaction_pending=True,
+                ) from cleanup_error
         except Exception as error:
+            if audit_published:
+                if (
+                    isinstance(error, LeaseError)
+                    and error.code == "LEASE_TRANSACTION_CLEANUP_FAILED"
+                ):
+                    raise
+                raise LeaseError(
+                    "LEASE_TRANSACTION_CLEANUP_FAILED",
+                    f"lease mutation audit is durable but journal cleanup failed: {error}",
+                    task_id=current.id,
+                    event=event,
+                    transaction_pending=True,
+                ) from error
             try:
                 if task_written:
                     self.tasks._atomic_write(task_path, current)
@@ -1401,6 +1703,15 @@ def complete_task(
     )
 
 
+def recover_pending(
+    channel: Path | str,
+    *,
+    root: Path | str | None = None,
+    actor: str = "recovery",
+) -> None:
+    LeaseStore(channel, root=root).recover_pending(actor=actor)
+
+
 def recover_task(
     channel: Path | str,
     task_id: str,
@@ -1432,6 +1743,7 @@ __all__ = [
     "LeaseRecord",
     "LeaseStore",
     "claim_task",
+    "recover_pending",
     "complete_task",
     "release_task",
     "renew_task",

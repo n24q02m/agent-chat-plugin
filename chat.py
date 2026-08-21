@@ -704,6 +704,12 @@ def cmd_task_recover(root: Path, a):
         )
     _print_task_result("recovered", task)
 
+def cmd_task_recover_pending(root: Path, a):
+    store = _lease_store(root, a.channel)
+    with contextlib.redirect_stdout(io.StringIO()):
+        store.recover_pending(actor=_task_actor(a))
+    print(f"recovered pending lease transaction in {a.channel}")
+
 
 # --- argparse ----------------------------------------------------------------
 
@@ -864,6 +870,14 @@ def build_parser() -> argparse.ArgumentParser:
     s.add_argument("--reason", required=True)
     s.add_argument("--lease-seconds", "--lease", "--ttl", type=float, default=300.0)
     s.set_defaults(func=cmd_task_recover)
+
+    s = task_sub.add_parser(
+        "recover-pending",
+        help="recover a pending crashed lease transaction",
+    )
+    s.add_argument("channel")
+    s.add_argument("--as", "--from", dest="actor", required=True)
+    s.set_defaults(func=cmd_task_recover_pending)
 
     for command, handler, help_text, action in (
         ("done", cmd_task_done, "mark a task done", "done"),
