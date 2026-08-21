@@ -49,7 +49,8 @@ python ${CLAUDE_PLUGIN_ROOT}/chat.py task release <channel> <task-id> \
 python ${CLAUDE_PLUGIN_ROOT}/chat.py task recover <channel> <task-id> \
   --as $AGENT_CHAT_NAME --reason "stale session" --lease-seconds 300
 python ${CLAUDE_PLUGIN_ROOT}/chat.py task recover-pending <channel> \
-  --as $AGENT_CHAT_NAME
+  --as $AGENT_CHAT_NAME \
+  [--resolve-publication rollback|published]
 ```
 
 `claim`, `renew`, and `recover` accept `--lease-seconds`, `--lease`, or
@@ -70,7 +71,10 @@ lease. Lease mutations emit auditable `lease.claimed`, `lease.renewed`,
 crashes during a two-file mutation, access fails closed with
 `LEASE_TRANSACTION_PENDING` until `task recover-pending <channel> --as
 <agent>` explicitly rolls back an unapplied marker or finishes cleanup of a
-published transaction.
+published transaction. A legacy v1 marker with `phase: applied` and no
+transaction-specific audit proof returns
+`LEASE_TRANSACTION_PUBLICATION_UNKNOWN`; rerun with
+`--resolve-publication rollback` or `published` after operator inspection.
 
 `create` starts every task as `open`; repeat `--depends-on`, `--files-hint`,
 or `--acceptance` for multiple values (comma-separated values are also
@@ -112,8 +116,9 @@ task failures include `TASK_INVALID_COMMAND`, `TASK_INVALID_ARGUMENT`,
 `LEASE_INVALID_RECORD`, `LEASE_REQUIRED_FIELD_MISSING`, `LEASE_UNKNOWN_FIELD`,
 `LEASE_RECORD_ID_MISMATCH`, `LEASE_STORAGE_INVALID`,
 `LEASE_PATH_OUTSIDE_WORKSPACE`, `LEASE_TRANSACTION_PENDING`,
-`LEASE_TRANSACTION_CLEANUP_FAILED`, `LEASE_TRANSACTION_INVALID`,
-`LEASE_TRANSACTION_NOT_FOUND`, `LEASE_TRANSACTION_RECOVERY_FAILED`,
+`LEASE_TRANSACTION_CLEANUP_FAILED`, `LEASE_TRANSACTION_PUBLICATION_UNKNOWN`,
+`LEASE_TRANSACTION_INVALID`, `LEASE_TRANSACTION_NOT_FOUND`,
+`LEASE_TRANSACTION_RECOVERY_FAILED`,
 `LEASE_AUDIT_FAILED`, and `LEASE_AUDIT_ROLLBACK_FAILED`.
 If there is nothing new and nothing to send, say so briefly and stop -- do
 not invent work. If you need to start a new group chat, use

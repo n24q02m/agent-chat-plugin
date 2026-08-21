@@ -54,7 +54,8 @@ chat.py task block <channel> <task-id> --as <agent>
 chat.py task release <channel> <task-id> --as <agent>
 chat.py task recover <channel> <task-id> --as <agent> \
   --reason "stale session" --lease-seconds 300
-chat.py task recover-pending <channel> --as <agent>
+chat.py task recover-pending <channel> --as <agent> \
+  [--resolve-publication rollback|published]
 ```
 
 `claim`, `renew`, and stale `recover` accept `--lease-seconds`, `--lease`, or
@@ -68,7 +69,10 @@ stale `task recover` requires a new owner and non-empty reason and records
 `previous_owner`, `previous_lease_expires_at`, and `recovery_reason`.
 After a crash, `task recover-pending <channel> --as <agent>` explicitly
 finishes cleanup/rollback of the durable transaction marker; it never silently
-steals or reassigns a stale task.
+steals or reassigns a stale task. Legacy v1 `applied` markers whose audit
+publication cannot be proven fail closed with `LEASE_TRANSACTION_PUBLICATION_UNKNOWN`;
+rerun the command with `--resolve-publication rollback` or `published` after
+operator inspection.
 
 `create` accepts `--owner`, `--depends-on`, `--files-hint`, `--acceptance`, and
 `--branch`. Repeat list options to add multiple values. `update` accepts
@@ -103,8 +107,9 @@ Task codes include `TASK_INVALID_COMMAND`, `TASK_INVALID_ARGUMENT`,
 `LEASE_INVALID_RECORD`, `LEASE_REQUIRED_FIELD_MISSING`, `LEASE_UNKNOWN_FIELD`,
 `LEASE_RECORD_ID_MISMATCH`, `LEASE_STORAGE_INVALID`,
 `LEASE_PATH_OUTSIDE_WORKSPACE`, `LEASE_TRANSACTION_PENDING`,
-`LEASE_TRANSACTION_CLEANUP_FAILED`, `LEASE_TRANSACTION_INVALID`,
-`LEASE_TRANSACTION_NOT_FOUND`, `LEASE_TRANSACTION_RECOVERY_FAILED`,
+`LEASE_TRANSACTION_CLEANUP_FAILED`, `LEASE_TRANSACTION_PUBLICATION_UNKNOWN`,
+`LEASE_TRANSACTION_INVALID`, `LEASE_TRANSACTION_NOT_FOUND`,
+`LEASE_TRANSACTION_RECOVERY_FAILED`,
 `LEASE_AUDIT_FAILED`, and `LEASE_AUDIT_ROLLBACK_FAILED`. Lease writes use a
 durable transaction marker with prepared/applied/published phases; after a
 crash or cleanup failure, access fails closed until
