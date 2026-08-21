@@ -8,6 +8,7 @@ normal Agent Chat message event.
 
 from __future__ import annotations
 
+import base64
 import contextlib
 import datetime as _dt
 import json
@@ -28,6 +29,9 @@ import chat
 
 
 LOCKS_DIRNAME = "locks"
+TRANSACTION_FILENAME = ".path-lock-transaction.json"
+MUTATION_LOCK_FILENAME = ".path-locks.lock"
+TRANSACTION_PHASES = {"prepared", "applied", "published"}
 DEFAULT_LOCK_SECONDS = 300.0
 LOCK_FIELDS = (
     "lock_id",
@@ -68,6 +72,17 @@ class LockedPath:
             raise PathLockError(
                 "PATH_LOCK_INVALID_RECORD", "normalized_path must be non-empty text"
             )
+        if any(_is_forbidden_text_character(char) for char in self.normalized_path):
+            raise PathLockError(
+                "PATH_LOCK_INVALID_RECORD",
+                "normalized_path contains a forbidden control character",
+            )
+        if self.normalized_path != _platform_casefold(self.normalized_path):
+            raise PathLockError(
+                "PATH_LOCK_INVALID_RECORD",
+                "normalized_path is not in the platform canonical case",
+                normalized_path=self.normalized_path,
+            )
         if (
             self.normalized_path != "."
             and (
@@ -86,7 +101,7 @@ class LockedPath:
         if (
             not isinstance(self.display_path, str)
             or not self.display_path
-            or any(char in self.display_path for char in "\x00\r\n")
+            or any(_is_forbidden_text_character(char) for char in self.display_path)
         ):
             raise PathLockError(
                 "PATH_LOCK_INVALID_RECORD", "display_path must be safe non-empty text"
@@ -163,6 +178,18 @@ class PathLockRecord:
             _timestamp(self.previous_expires_at, field="previous_expires_at")
         if self.recovery_reason is not None:
             _validate_reason(self.recovery_reason)
+        recovery_fields = (
+            self.previous_owner,
+            self.previous_expires_at,
+            self.recovery_reason,
+        )
+        if any(value is not None for value in recovery_fields) and not all(
+            value is not None for value in recovery_fields
+        ):
+            raise PathLockError(
+                "PATH_LOCK_INVALID_RECORD",
+                "previous owner, expiry, and recovery reason must be recorded together",
+            )
     @classmethod
     def from_dict(cls, data: Mapping[str, Any]) -> "PathLockRecord":
         if not isinstance(data, Mapping):
@@ -186,12 +213,30 @@ class PathLockRecord:
                 "lock record contains unknown fields",
                 fields=unknown,
             )
+        if (
+            "expires_at" in actual
+            and "lease_expires_at" in actual
+            and data["expires_at"] != data["lease_expires_at"]
+        ):
+            raise PathLockError(
+                "PATH_LOCK_INVALID_RECORD",
+                "expires_at and lease_expires_at aliases disagree",
+            )
+        if (
+            "previous_expires_at" in actual
+            and "previous_lease_expires_at" in actual
+            and data["previous_expires_at"] != data["previous_lease_expires_at"]
+        ):
+            raise PathLockError(
+                "PATH_LOCK_INVALID_RECORD",
+                "previous expiry aliases disagree",
+            )
         raw_paths = data["paths"]
         if not isinstance(raw_paths, list):
             raise PathLockError("PATH_LOCK_INVALID_RECORD", "lock paths must be an array")
-        expiry = data.get("lease_expires_at", data.get("expires_at"))
+        expiry = data.get("expires_at", data.get("lease_expires_at"))
         previous_expiry = data.get(
-            "previous_lease_expires_at", data.get("previous_expires_at")
+            "previous_expires_at", data.get("previous_lease_expires_at")
         )
         return cls(
             lock_id=data["lock_id"],
@@ -219,6 +264,17 @@ class PathLockRecord:
             "previous_expires_at": self.previous_expires_at,
             "recovery_reason": self.recovery_reason,
         }
+    @property
+    def lease_expires_at(self) -> str:
+        """Task4-compatible spelling for the active lease expiry."""
+
+        return self.expires_at
+
+    @property
+    def previous_lease_expires_at(self) -> str | None:
+        """Task4-compatible spelling for the prior lease expiry."""
+
+        return self.previous_expires_at
 
 
 # Friendly aliases for callers that use the noun "lock" rather than "path".
@@ -226,9 +282,16 @@ LockRecord = PathLockRecord
 PathLockPath = LockedPath
 
 
+def _is_forbidden_text_character(value: str) -> bool:
+    codepoint = ord(value)
+    return codepoint < 0x20 or 0x7F <= codepoint <= 0x9F or 0xD800 <= codepoint <= 0xDFFF
+
+
 def _validate_identity(value: Any, field: str, code: str) -> str:
     if not isinstance(value, str) or not value or not _ID_RE.fullmatch(value):
         raise PathLockError(code, f"{field} must be a safe identity")
+    if any(_is_forbidden_text_character(char) for char in value):
+        raise PathLockError(code, f"{field} contains a forbidden control character")
     return value
 
 
@@ -298,10 +361,19 @@ def _path_error(message: str, *, path: Any = None) -> PathLockError:
     return PathLockError("PATH_LOCK_INVALID_PATH", message, **details)
 
 
+def _storage_error(operation: str, error: BaseException) -> PathLockError:
+    return PathLockError(
+        "PATH_LOCK_STORAGE_ERROR",
+        f"{operation} failed: {error}",
+        operation=operation,
+        cause=type(error).__name__,
+    )
+
+
 def _display_parts(display_path: Any) -> list[str]:
     if not isinstance(display_path, str) or not display_path:
         raise _path_error("path must be a non-empty string", path=display_path)
-    if "\x00" in display_path or "\r" in display_path or "\n" in display_path:
+    if any(_is_forbidden_text_character(char) for char in display_path):
         raise _path_error("path contains a forbidden control character", path=display_path)
 
     # Use both path grammars so a Windows absolute path cannot be smuggled into
@@ -323,12 +395,52 @@ def _display_parts(display_path: Any) -> list[str]:
     raw_parts = portable.split("/")
     if any(part == ".." for part in raw_parts):
         raise _path_error("parent traversal is not allowed", path=display_path)
+    if os.name == "nt":
+        reserved = {
+            "CON",
+            "PRN",
+            "AUX",
+            "NUL",
+            *(f"COM{index}" for index in range(1, 10)),
+            *(f"LPT{index}" for index in range(1, 10)),
+        }
+        for part in raw_parts:
+            if not part or part == ".":
+                continue
+            if part.endswith((" ", ".")):
+                raise _path_error(
+                    "Windows path components may not end with space or dot",
+                    path=display_path,
+                )
+            if any(char in '<>\"|?*' for char in part):
+                raise _path_error("path contains an unrepresentable Windows name", path=display_path)
+            stem = part.split(".", 1)[0].upper()
+            if stem in reserved:
+                raise _path_error("path contains a reserved Windows name", path=display_path)
     # Collapse harmless duplicate separators and current-directory markers.
     # The original spelling remains in ``display_path`` for auditability.
     parts = [part for part in raw_parts if part not in {"", "."}]
     if not parts:
         return ["."]
     return parts
+
+
+def _validate_persisted_normalized_path(value: str) -> None:
+    try:
+        parts = _display_parts(value)
+    except PathLockError as error:
+        raise PathLockError(
+            "PATH_LOCK_INVALID_RECORD",
+            "persisted normalized_path is not a valid workspace-relative path",
+            normalized_path=value,
+        ) from error
+    canonical = "/".join(parts)
+    if canonical != value or canonical != _platform_casefold(canonical):
+        raise PathLockError(
+            "PATH_LOCK_INVALID_RECORD",
+            "persisted normalized_path is not platform-canonical",
+            normalized_path=value,
+        )
 
 
 def _paths_overlap(left: str, right: str) -> bool:
@@ -339,6 +451,35 @@ def _paths_overlap(left: str, right: str) -> bool:
         or left.startswith(right + "/")
         or right.startswith(left + "/")
     )
+
+@dataclass
+class _MutationHandle:
+    path: Path
+    fd: int
+    released: bool = False
+
+    def release(self) -> None:
+        if self.released:
+            return
+        try:
+            os.lseek(self.fd, 0, os.SEEK_SET)
+            if os.name == "nt":
+                import msvcrt
+
+                msvcrt.locking(self.fd, msvcrt.LK_UNLCK, 1)
+            else:
+                import fcntl
+
+                fcntl.flock(self.fd, fcntl.LOCK_UN)
+        except OSError:
+            pass
+        finally:
+            self.released = True
+            try:
+                os.close(self.fd)
+            except OSError:
+                pass
+
 
 
 class PathLockStore:
@@ -369,15 +510,20 @@ class PathLockStore:
     @property
     def locks_dir(self) -> Path:
         return self.channel / LOCKS_DIRNAME
+    @property
+    def transaction_path(self) -> Path:
+        path = self.locks_dir / TRANSACTION_FILENAME
+        self._assert_inside_channel(path)
+        return path
 
     @property
     def mutation_lock_path(self) -> Path:
-        return self.channel / "_path-locks.lock"
+        return self.channel / MUTATION_LOCK_FILENAME
 
     def _assert_inside_root(self, path: Path) -> None:
         try:
             path.resolve(strict=False).relative_to(self.root.resolve(strict=False))
-        except (OSError, RuntimeError, ValueError) as error:
+        except (OSError, RuntimeError, ValueError, UnicodeError) as error:
             raise PathLockError(
                 "PATH_LOCK_PATH_OUTSIDE_WORKSPACE",
                 f"channel path escapes configured root: {path}",
@@ -387,54 +533,117 @@ class PathLockStore:
     def _assert_inside_channel(self, path: Path) -> None:
         try:
             path.resolve(strict=False).relative_to(self.channel.resolve(strict=False))
-        except (OSError, RuntimeError, ValueError) as error:
+        except (OSError, RuntimeError, ValueError, UnicodeError) as error:
             raise PathLockError(
                 "PATH_LOCK_PATH_OUTSIDE_WORKSPACE",
                 f"path escapes channel workspace: {path}",
                 path=str(path),
             ) from error
 
-    def _ensure_locks_dir(self) -> Path:
-        self._assert_inside_channel(self.locks_dir)
-        if self.locks_dir.exists() and not self.locks_dir.is_dir():
+    def _revalidate_storage(self) -> Path:
+        try:
+            if self.locks_dir.is_symlink() or os.path.islink(str(self.locks_dir)):
+                raise PathLockError(
+                    "PATH_LOCK_PATH_OUTSIDE_WORKSPACE",
+                    "lock storage may not be a symlink or junction",
+                    path=str(self.locks_dir),
+                )
+            if self.locks_dir.exists() and not self.locks_dir.is_dir():
+                raise PathLockError(
+                    "PATH_LOCK_STORAGE_INVALID",
+                    f"lock storage is not a directory: {self.locks_dir}",
+                )
+            resolved = self.locks_dir.resolve(strict=False)
+            resolved.relative_to(self.channel.resolve(strict=False))
+        except PathLockError:
+            raise
+        except (OSError, RuntimeError, ValueError, UnicodeError) as error:
             raise PathLockError(
-                "PATH_LOCK_STORAGE_INVALID",
-                f"lock storage is not a directory: {self.locks_dir}",
-            )
-        self.locks_dir.mkdir(parents=True, exist_ok=True)
-        self._assert_inside_channel(self.locks_dir)
+                "PATH_LOCK_PATH_OUTSIDE_WORKSPACE",
+                f"lock storage containment could not be proven: {self.locks_dir}",
+                path=str(self.locks_dir),
+            ) from error
         return self.locks_dir
 
-    def _acquire_mutation_lock(self) -> Path:
-        lock = self.mutation_lock_path
-        self._assert_inside_channel(lock)
+    def _revalidate_mutation_lock(self) -> Path:
+        path = self.mutation_lock_path
+        self._assert_inside_channel(path)
+        try:
+            if path.is_symlink() or os.path.islink(str(path)):
+                raise PathLockError(
+                    "PATH_LOCK_PATH_OUTSIDE_WORKSPACE",
+                    "mutation lock may not be a symlink or junction",
+                    path=str(path),
+                )
+            if path.exists() and not path.is_file():
+                raise PathLockError(
+                    "PATH_LOCK_STORAGE_INVALID",
+                    f"mutation lock is not a regular file: {path}",
+                )
+        except PathLockError:
+            raise
+        except (OSError, RuntimeError, UnicodeError) as error:
+            raise _storage_error("mutation lock validation", error)
+        return path
+
+    def _ensure_locks_dir(self) -> Path:
+        self._revalidate_storage()
+        try:
+            self.locks_dir.mkdir(parents=True, exist_ok=True)
+        except OSError as error:
+            raise _storage_error("lock storage creation", error) from error
+        self._revalidate_storage()
+        return self.locks_dir
+
+    def _acquire_mutation_lock(self) -> _MutationHandle:
+        path = self._revalidate_mutation_lock()
+        flags = os.O_RDWR | os.O_CREAT
+        no_follow = getattr(os, "O_NOFOLLOW", 0)
+        try:
+            fd = os.open(str(path), flags | no_follow, 0o600)
+        except OSError as error:
+            raise _storage_error("mutation lock open", error) from error
+        if os.name == "nt":
+            try:
+                if os.fstat(fd).st_size == 0:
+                    os.write(fd, b"\0")
+            except OSError as error:
+                os.close(fd)
+                raise _storage_error("mutation lock initialization", error) from error
         started = time.monotonic()
         while True:
             try:
-                os.mkdir(lock)
-                return lock
-            except FileExistsError:
+                os.lseek(fd, 0, os.SEEK_SET)
+                if os.name == "nt":
+                    import msvcrt
+
+                    msvcrt.locking(fd, msvcrt.LK_NBLCK, 1)
+                else:
+                    import fcntl
+
+                    fcntl.flock(fd, fcntl.LOCK_EX | fcntl.LOCK_NB)
+                self._revalidate_mutation_lock()
+                return _MutationHandle(path, fd)
+            except PathLockError:
                 try:
-                    if time.time() - lock.stat().st_mtime > self._mutation_stale:
-                        try:
-                            os.rmdir(lock)
-                        except OSError:
-                            pass
-                        continue
-                except FileNotFoundError:
-                    continue
+                    os.close(fd)
+                except OSError:
+                    pass
+                raise
+            except OSError:
                 if time.monotonic() - started > self._mutation_timeout:
+                    try:
+                        os.close(fd)
+                    except OSError:
+                        pass
                     raise PathLockError(
                         "PATH_LOCK_TIMEOUT", "could not acquire path-lock mutation lock"
                     )
                 time.sleep(0.01)
 
     @staticmethod
-    def _release_mutation_lock(lock: Path) -> None:
-        try:
-            os.rmdir(lock)
-        except OSError:
-            pass
+    def _release_mutation_lock(lock: _MutationHandle) -> None:
+        lock.release()
 
     @contextlib.contextmanager
     def _mutation(self):
@@ -446,12 +655,13 @@ class PathLockStore:
 
     def _lock_path(self, lock_id: str) -> Path:
         _validate_identity(lock_id, "lock_id", "PATH_LOCK_INVALID_LOCK_ID")
+        self._revalidate_storage()
         path = self.locks_dir / f"{lock_id}.json"
         self._assert_inside_channel(path)
         try:
             if path.resolve(strict=False).parent != self.locks_dir.resolve(strict=False):
                 raise ValueError
-        except (OSError, RuntimeError, ValueError) as error:
+        except (OSError, RuntimeError, ValueError, UnicodeError) as error:
             raise PathLockError(
                 "PATH_LOCK_PATH_OUTSIDE_WORKSPACE",
                 f"lock record path escapes lock storage: {path}",
@@ -474,6 +684,31 @@ class PathLockStore:
                 path=str(path),
             ) from error
         record = PathLockRecord.from_dict(raw)
+        for locked_path in record.paths:
+            _validate_persisted_normalized_path(locked_path.normalized_path)
+            parts = (
+                []
+                if locked_path.normalized_path == "."
+                else locked_path.normalized_path.split("/")
+            )
+            candidate = self.channel.joinpath(*parts)
+            try:
+                relative = candidate.resolve(strict=False).relative_to(
+                    self.channel.resolve(strict=False)
+                )
+            except (OSError, RuntimeError, ValueError, UnicodeError) as error:
+                raise PathLockError(
+                    "PATH_LOCK_INVALID_RECORD",
+                    "persisted path escapes channel workspace",
+                    normalized_path=locked_path.normalized_path,
+                ) from error
+            actual = _platform_casefold(relative.as_posix() or ".")
+            if actual != locked_path.normalized_path:
+                raise PathLockError(
+                    "PATH_LOCK_INVALID_RECORD",
+                    "persisted normalized_path does not match channel canonical path",
+                    normalized_path=locked_path.normalized_path,
+                )
         if record.channel != self.channel.name:
             raise PathLockError(
                 "PATH_LOCK_INVALID_RECORD",
@@ -489,6 +724,8 @@ class PathLockStore:
         return record
 
     def _read_all(self) -> list[PathLockRecord]:
+        self._assert_no_pending_transaction()
+        self._revalidate_storage()
         if not self.locks_dir.exists():
             return []
         if not self.locks_dir.is_dir():
@@ -513,16 +750,22 @@ class PathLockStore:
             return self._read_record(path)
 
     def normalize_paths(self, paths: Iterable[str]) -> tuple[LockedPath, ...]:
+        if paths is None:
+            raise _path_error("at least one path is required")
         if isinstance(paths, (str, bytes)):
             paths = [paths]  # type: ignore[list-item]
         normalized: list[LockedPath] = []
         for display_path in paths:
             parts = _display_parts(display_path)
-            candidate = self.channel.joinpath(*parts)
             try:
+                candidate = self.channel.joinpath(*parts)
                 resolved_channel = self.channel.resolve(strict=False)
                 resolved = candidate.resolve(strict=False)
                 relative = resolved.relative_to(resolved_channel)
+            except UnicodeError as error:
+                raise _path_error(
+                    "path contains malformed Unicode", path=display_path
+                ) from error
             except (OSError, RuntimeError, ValueError) as error:
                 raise PathLockError(
                     "PATH_LOCK_PATH_OUTSIDE_WORKSPACE",
@@ -652,16 +895,17 @@ class PathLockStore:
 
     def _write_exclusive(self, path: Path, record: PathLockRecord) -> None:
         directory = self._ensure_locks_dir()
+        self._assert_inside_channel(path)
         payload = self._json_bytes(record)
-        flags = os.O_WRONLY | os.O_CREAT | os.O_EXCL
+        temporary: Path | None = None
+        fd = -1
         try:
-            fd = os.open(str(path), flags, 0o600)
-        except FileExistsError as error:
-            raise PathLockError(
-                "PATH_LOCK_CONFLICT", f"lock id already exists: {record.lock_id}"
-            ) from error
-        committed = False
-        try:
+            fd, temporary_name = tempfile.mkstemp(
+                prefix=f".{path.stem}.", suffix=".tmp", dir=str(directory)
+            )
+            temporary = Path(temporary_name)
+            self._assert_inside_channel(temporary)
+            self._revalidate_storage()
             with os.fdopen(fd, "wb") as stream:
                 stream.write(payload)
                 stream.flush()
@@ -669,22 +913,52 @@ class PathLockStore:
                     os.fsync(stream.fileno())
                 except OSError:
                     pass
-            committed = True
+            fd = -1
+            self._revalidate_storage()
+            try:
+                os.link(str(temporary), str(path))
+            except FileExistsError as error:
+                raise PathLockError(
+                    "PATH_LOCK_CONFLICT", f"lock id already exists: {record.lock_id}"
+                ) from error
+            except OSError as error:
+                self._revalidate_storage()
+                raise _storage_error("atomic lock publish", error) from error
+            self._revalidate_storage()
+            try:
+                temporary.unlink()
+            except FileNotFoundError:
+                pass
+            temporary = None
             self._fsync_directory(directory)
+        except PathLockError:
+            raise
+        except (OSError, UnicodeError) as error:
+            raise _storage_error("exclusive lock write", error) from error
         finally:
-            if not committed:
+            if fd != -1:
                 try:
-                    path.unlink()
+                    os.close(fd)
+                except OSError:
+                    pass
+            if temporary is not None:
+                try:
+                    temporary.unlink()
                 except FileNotFoundError:
                     pass
 
     def _write_atomic(self, path: Path, record: PathLockRecord) -> None:
         directory = self._ensure_locks_dir()
-        fd, temporary_name = tempfile.mkstemp(
-            prefix=f".{path.stem}.", suffix=".tmp", dir=str(directory)
-        )
-        temporary = Path(temporary_name)
+        self._assert_inside_channel(path)
+        temporary: Path | None = None
+        fd = -1
         try:
+            fd, temporary_name = tempfile.mkstemp(
+                prefix=f".{path.stem}.", suffix=".tmp", dir=str(directory)
+            )
+            temporary = Path(temporary_name)
+            self._assert_inside_channel(temporary)
+            self._revalidate_storage()
             with os.fdopen(fd, "wb") as stream:
                 stream.write(self._json_bytes(record))
                 stream.flush()
@@ -692,28 +966,50 @@ class PathLockStore:
                     os.fsync(stream.fileno())
                 except OSError:
                     pass
+            fd = -1
+            self._revalidate_storage()
             os.replace(temporary, path)
+            temporary = None
+            self._revalidate_storage()
             self._fsync_directory(directory)
+        except PathLockError:
+            raise
+        except (OSError, UnicodeError) as error:
+            raise _storage_error("atomic lock replace", error) from error
         finally:
-            try:
-                temporary.unlink()
-            except FileNotFoundError:
-                pass
+            if fd != -1:
+                try:
+                    os.close(fd)
+                except OSError:
+                    pass
+            if temporary is not None:
+                try:
+                    temporary.unlink()
+                except FileNotFoundError:
+                    pass
 
     def _restore_bytes(self, path: Path, previous: bytes | None) -> None:
+        self._assert_inside_channel(path)
         if previous is None:
             try:
                 path.unlink()
+                self._revalidate_storage()
+                self._fsync_directory(path.parent)
             except FileNotFoundError:
-                pass
-            self._fsync_directory(path.parent)
+                return
+            except (OSError, UnicodeError) as error:
+                raise _storage_error("lock rollback removal", error) from error
             return
         directory = self._ensure_locks_dir()
-        fd, temporary_name = tempfile.mkstemp(
-            prefix=f".{path.stem}.rollback.", suffix=".tmp", dir=str(directory)
-        )
-        temporary = Path(temporary_name)
+        temporary: Path | None = None
+        fd = -1
         try:
+            fd, temporary_name = tempfile.mkstemp(
+                prefix=f".{path.stem}.rollback.", suffix=".tmp", dir=str(directory)
+            )
+            temporary = Path(temporary_name)
+            self._assert_inside_channel(temporary)
+            self._revalidate_storage()
             with os.fdopen(fd, "wb") as stream:
                 stream.write(previous)
                 stream.flush()
@@ -721,14 +1017,27 @@ class PathLockStore:
                     os.fsync(stream.fileno())
                 except OSError:
                     pass
+            fd = -1
+            self._revalidate_storage()
             os.replace(temporary, path)
+            temporary = None
+            self._revalidate_storage()
             self._fsync_directory(directory)
+        except PathLockError:
+            raise
+        except (OSError, UnicodeError) as error:
+            raise _storage_error("lock rollback restore", error) from error
         finally:
-            try:
-                temporary.unlink()
-            except FileNotFoundError:
-                pass
-
+            if fd != -1:
+                try:
+                    os.close(fd)
+                except OSError:
+                    pass
+            if temporary is not None:
+                try:
+                    temporary.unlink()
+                except FileNotFoundError:
+                    pass
     def _post_event(
         self,
         event: str,
@@ -736,8 +1045,11 @@ class PathLockStore:
         *,
         actor: str | None,
         previous: PathLockRecord | None = None,
+        transaction_id: str | None = None,
         details: Mapping[str, Any] | None = None,
     ) -> None:
+        sender = actor or record.owner
+        _validate_identity(sender, "actor", "PATH_LOCK_INVALID_OWNER")
         payload: dict[str, Any] = {
             "event": event,
             "lock_id": record.lock_id,
@@ -745,6 +1057,7 @@ class PathLockStore:
             "owner": record.owner,
             "paths": [path.to_dict() for path in record.paths],
             "expires_at": record.expires_at,
+            "lease_expires_at": record.lease_expires_at,
             "updated_at": record.updated_at,
         }
         if previous is not None:
@@ -752,14 +1065,20 @@ class PathLockStore:
                 {
                     "previous_owner": previous.owner,
                     "previous_expires_at": previous.expires_at,
+                    "previous_lease_expires_at": previous.lease_expires_at,
                 }
             )
+        if transaction_id is not None:
+            _validate_identity(
+                transaction_id, "transaction_id", "PATH_LOCK_TRANSACTION_INVALID"
+            )
+            payload["transaction_id"] = transaction_id
         if details:
             payload.update(details)
         body = json.dumps(payload, ensure_ascii=False, indent=2, sort_keys=True)
         args = SimpleNamespace(
             channel=self.channel.name,
-            sender=actor or record.owner,
+            sender=sender,
             to="all",
             title=f"{event} {record.lock_id}",
             reply=None,
@@ -772,11 +1091,376 @@ class PathLockStore:
         except (chat.AgentChatError, OSError, UnicodeError) as error:
             raise PathLockError(
                 "PATH_LOCK_AUDIT_FAILED",
-                f"path lock changed but audit event could not be written: {error}",
+                f"path lock audit event could not be written: {error}",
+                event=event,
+                lock_id=record.lock_id,
+                transaction_id=transaction_id,
+            ) from error
+
+    @property
+    def transaction_path(self) -> Path:
+        path = self.locks_dir / TRANSACTION_FILENAME
+        self._assert_inside_channel(path)
+        return path
+
+    @staticmethod
+    def _encode_bytes(value: bytes | None) -> str | None:
+        if value is None:
+            return None
+        return base64.b64encode(value).decode("ascii")
+
+    @staticmethod
+    def _decode_bytes(value: Any) -> bytes | None:
+        if value is None:
+            return None
+        if not isinstance(value, str):
+            raise PathLockError(
+                "PATH_LOCK_TRANSACTION_INVALID",
+                "transaction bytes must be base64 text",
+            )
+        try:
+            return base64.b64decode(value.encode("ascii"), validate=True)
+        except (ValueError, UnicodeError) as error:
+            raise PathLockError(
+                "PATH_LOCK_TRANSACTION_INVALID",
+                "transaction bytes are not valid base64",
+            ) from error
+
+    def _atomic_write_payload(self, path: Path, payload: bytes) -> None:
+        directory = self._ensure_locks_dir()
+        temporary: Path | None = None
+        fd = -1
+        try:
+            fd, temporary_name = tempfile.mkstemp(
+                prefix=f".{path.stem}.", suffix=".tmp", dir=str(directory)
+            )
+            temporary = Path(temporary_name)
+            self._assert_inside_channel(temporary)
+            self._revalidate_storage()
+            with os.fdopen(fd, "wb") as stream:
+                stream.write(payload)
+                stream.flush()
+                try:
+                    os.fsync(stream.fileno())
+                except OSError:
+                    pass
+            fd = -1
+            self._revalidate_storage()
+            try:
+                os.replace(temporary, path)
+            except OSError as error:
+                self._revalidate_storage()
+                raise _storage_error("transaction publish", error) from error
+            temporary = None
+            self._revalidate_storage()
+            self._fsync_directory(directory)
+        except PathLockError:
+            raise
+        except (OSError, UnicodeError) as error:
+            raise _storage_error("transaction write", error) from error
+        finally:
+            if fd != -1:
+                try:
+                    os.close(fd)
+                except OSError:
+                    pass
+            if temporary is not None:
+                try:
+                    temporary.unlink()
+                except FileNotFoundError:
+                    pass
+    def _write_transaction(self, transaction: Mapping[str, Any]) -> None:
+        payload = (
+            json.dumps(
+                transaction,
+                ensure_ascii=False,
+                indent=2,
+                sort_keys=True,
+                separators=(",", ": "),
+            )
+            + "\n"
+        ).encode("utf-8")
+        self._atomic_write_payload(self.transaction_path, payload)
+
+    def _read_transaction(self) -> dict[str, Any] | None:
+        path = self.transaction_path
+        if not path.exists():
+            return None
+        try:
+            raw = json.loads(path.read_text(encoding="utf-8"))
+        except (OSError, UnicodeError, json.JSONDecodeError) as error:
+            raise PathLockError(
+                "PATH_LOCK_TRANSACTION_INVALID",
+                f"could not read transaction marker: {error}",
+                path=str(path),
+            ) from error
+        required = {
+            "version",
+            "transaction_id",
+            "phase",
+            "operation",
+            "event",
+            "target",
+            "before",
+            "after",
+            "actor",
+        }
+        if (
+            not isinstance(raw, dict)
+            or raw.get("version") not in {1, 2}
+            or raw.get("phase") not in TRANSACTION_PHASES
+            or not required.issubset(raw)
+            or not isinstance(raw.get("transaction_id"), str)
+            or not _ID_RE.fullmatch(raw["transaction_id"])
+            or raw.get("operation") not in {"lock", "unlock", "recover"}
+            or not isinstance(raw.get("target"), str)
+            or not isinstance(raw.get("actor"), str)
+        ):
+            raise PathLockError(
+                "PATH_LOCK_TRANSACTION_INVALID",
+                "transaction marker has an unsupported shape",
+                path=str(path),
+            )
+        target = raw["target"].replace("\\", "/")
+        target_parts = target.split("/")
+        if len(target_parts) == 1:
+            target_name = target_parts[0]
+        elif len(target_parts) == 2 and target_parts[0] == LOCKS_DIRNAME:
+            target_name = target_parts[1]
+        else:
+            target_name = ""
+        if (
+            not target_name.endswith(".json")
+            or not _ID_RE.fullmatch(target_name[:-5])
+        ):
+            raise PathLockError(
+                "PATH_LOCK_TRANSACTION_INVALID",
+                "transaction target is not a lock record filename",
+                target=raw["target"],
+            )
+        _validate_identity(raw["actor"], "actor", "PATH_LOCK_INVALID_OWNER")
+        self._decode_bytes(raw["before"])
+        self._decode_bytes(raw["after"])
+        if raw.get("previous_bytes") is not None:
+            self._decode_bytes(raw["previous_bytes"])
+        if raw.get("next_bytes") is not None:
+            self._decode_bytes(raw["next_bytes"])
+        return raw
+
+    def _remove_transaction(self) -> None:
+        try:
+            self.transaction_path.unlink()
+            self._fsync_directory(self.transaction_path.parent)
+        except FileNotFoundError:
+            return
+        except (OSError, UnicodeError) as error:
+            raise _storage_error("transaction cleanup", error) from error
+
+    def _set_transaction_phase(self, phase: str) -> None:
+        if phase not in TRANSACTION_PHASES:
+            raise PathLockError(
+                "PATH_LOCK_TRANSACTION_INVALID", f"unsupported transaction phase: {phase}"
+            )
+        transaction = self._read_transaction()
+        if transaction is None:
+            raise PathLockError(
+                "PATH_LOCK_TRANSACTION_INVALID", "transaction marker is missing"
+            )
+        transaction["phase"] = phase
+        self._write_transaction(transaction)
+
+    def _assert_no_pending_transaction(self) -> None:
+        pending = self._read_transaction()
+        if pending is not None:
+            raise PathLockError(
+                "PATH_LOCK_TRANSACTION_PENDING",
+                "a previous path-lock mutation needs explicit recovery",
+                transaction_id=pending["transaction_id"],
+                operation=pending["operation"],
+                phase=pending["phase"],
+            )
+    def _audit_event_exists_for_transaction(self, transaction_id: Any) -> bool:
+        if not isinstance(transaction_id, str) or not transaction_id:
+            return False
+        marker = f'"transaction_id": "{transaction_id}"'
+        try:
+            message_paths = chat.message_files(self.channel)
+        except (OSError, UnicodeError):
+            return False
+        for path in message_paths:
+            try:
+                if marker in path.read_text(encoding="utf-8"):
+                    return True
+            except (OSError, UnicodeError):
+                continue
+        return False
+
+    def _transaction_for(
+        self,
+        *,
+        operation: str,
+        event: str,
+        path: Path,
+        before: bytes | None,
+        after: bytes | None,
+        actor: str,
+    ) -> dict[str, Any]:
+        self._assert_inside_channel(path)
+        if path.parent.resolve(strict=False) != self.locks_dir.resolve(strict=False):
+            raise PathLockError(
+                "PATH_LOCK_TRANSACTION_INVALID",
+                "transaction target is outside lock storage",
+                path=str(path),
+            )
+        return {
+            "version": 1,
+            "transaction_id": uuid.uuid4().hex,
+            "phase": "prepared",
+            "operation": operation,
+            "event": event,
+            "target": path.name,
+            "before": self._encode_bytes(before),
+            "after": self._encode_bytes(after),
+            "actor": actor,
+        }
+
+    def _run_transaction(
+        self,
+        *,
+        operation: str,
+        event: str,
+        path: Path,
+        before: bytes | None,
+        after: bytes | None,
+        actor: str,
+        record: PathLockRecord,
+        apply: Callable[[], None],
+        previous: PathLockRecord | None = None,
+        details: Mapping[str, Any] | None = None,
+    ) -> PathLockRecord:
+        self._assert_no_pending_transaction()
+        transaction = self._transaction_for(
+            operation=operation,
+            event=event,
+            path=path,
+            before=before,
+            after=after,
+            actor=actor,
+        )
+        self._write_transaction(transaction)
+        applied = False
+        audit_published = False
+        try:
+            apply()
+            applied = True
+            self._set_transaction_phase("applied")
+            self._post_event(
+                event,
+                record,
+                actor=actor,
+                previous=previous,
+                transaction_id=transaction["transaction_id"],
+                details=details,
+            )
+            audit_published = True
+            self._set_transaction_phase("published")
+            self._remove_transaction()
+        except Exception as error:
+            if audit_published:
+                raise PathLockError(
+                    "PATH_LOCK_TRANSACTION_CLEANUP_FAILED",
+                    f"path lock mutation is audited but transaction cleanup failed: {error}",
+                    transaction_pending=True,
+                    transaction_id=transaction["transaction_id"],
+                    operation=operation,
+                ) from error
+            if applied:
+                try:
+                    self._restore_bytes(path, before)
+                    self._remove_transaction()
+                except Exception as rollback_error:
+                    raise PathLockError(
+                        "PATH_LOCK_AUDIT_ROLLBACK_FAILED",
+                        f"path lock audit failed and rollback failed: {rollback_error}",
+                        transaction_pending=True,
+                        transaction_id=transaction["transaction_id"],
+                        original_error=str(error),
+                        rollback_error=str(rollback_error),
+                    ) from rollback_error
+            else:
+                try:
+                    self._remove_transaction()
+                except Exception:
+                    pass
+            if isinstance(error, PathLockError):
+                raise
+            if isinstance(error, (OSError, UnicodeError)):
+                raise _storage_error("path lock mutation", error) from error
+            raise PathLockError(
+                "PATH_LOCK_AUDIT_FAILED",
+                f"path lock audit failed: {error}",
                 event=event,
                 lock_id=record.lock_id,
             ) from error
+        return record
 
+    def recover_pending(
+        self,
+        *,
+        actor: str = "recovery",
+        publication_resolution: str | None = None,
+    ) -> None:
+        _validate_identity(actor, "actor", "PATH_LOCK_INVALID_OWNER")
+        with self._mutation():
+            transaction = self._read_transaction()
+            if transaction is None:
+                return
+            phase = transaction["phase"]
+            if publication_resolution is not None:
+                if phase not in {"applied", "published"}:
+                    raise PathLockError(
+                        "PATH_LOCK_TRANSACTION_INVALID",
+                        "publication resolution applies only to applied or published transactions",
+                    )
+                phase = (
+                    "published"
+                    if publication_resolution == "published"
+                    else "prepared"
+                )
+            elif phase in {"applied", "published"} and (
+                phase == "published"
+                or self._audit_event_exists_for_transaction(
+                    transaction["transaction_id"]
+                )
+            ):
+                phase = "published"
+            target = transaction["target"]
+            target_name = target.replace("\\", "/").split("/")[-1]
+            target_path = self._lock_path(target_name[:-5])
+            before = self._decode_bytes(transaction["before"])
+            after = self._decode_bytes(transaction["after"])
+            try:
+                if phase == "published":
+                    current = target_path.read_bytes() if target_path.exists() else None
+                    if current != after:
+                        raise PathLockError(
+                            "PATH_LOCK_TRANSACTION_INVALID",
+                            "published transaction does not match lock state",
+                            transaction_id=transaction["transaction_id"],
+                        )
+                    self._remove_transaction()
+                    return
+                self._restore_bytes(target_path, before)
+                self._remove_transaction()
+            except PathLockError:
+                raise
+            except Exception as error:
+                raise PathLockError(
+                    "PATH_LOCK_AUDIT_ROLLBACK_FAILED",
+                    f"pending path-lock recovery failed: {error}",
+                    transaction_pending=True,
+                    transaction_id=transaction["transaction_id"],
+                ) from error
     def _now(self, value: Any = None) -> _dt.datetime:
         candidate = self._clock() if value is None else value
         if isinstance(candidate, _dt.datetime):
@@ -821,6 +1505,7 @@ class PathLockStore:
             lease_seconds = ttl
         requested = self.normalize_paths(paths)
         with self._mutation():
+            self._assert_no_pending_transaction()
             current_now = self._now(now)
             conflicts = self._conflicts(requested, self._read_all())
             if conflicts:
@@ -836,15 +1521,19 @@ class PathLockStore:
                 updated_at=updated_at,
             )
             path = self._lock_path(record.lock_id)
-            try:
-                self._write_exclusive(path, record)
-                self._post_event("path.locked", record, actor=actor or owner)
-            except Exception:
-                self._restore_bytes(path, None)
-                raise
-            return record
+            return self._run_transaction(
+                operation="lock",
+                event="path.locked",
+                path=path,
+                before=None,
+                after=self._json_bytes(record),
+                actor=actor or owner,
+                record=record,
+                apply=lambda: self._write_exclusive(path, record),
+            )
 
     def _find_target(self, target: str) -> tuple[Path, PathLockRecord]:
+        self._revalidate_storage()
         if isinstance(target, str) and _ID_RE.fullmatch(target):
             path = self._lock_path(target)
             if path.exists():
@@ -879,6 +1568,7 @@ class PathLockStore:
     ) -> PathLockRecord:
         _validate_identity(owner, "owner", "PATH_LOCK_INVALID_OWNER")
         with self._mutation():
+            self._assert_no_pending_transaction()
             path, record = self._find_target(target)
             if record.owner != owner:
                 raise PathLockError(
@@ -888,15 +1578,28 @@ class PathLockStore:
                     owner=owner,
                     current_owner=record.owner,
                 )
-            previous = path.read_bytes()
             try:
-                path.unlink()
-                self._fsync_directory(path.parent)
-                self._post_event("path.lock.unlocked", record, actor=actor or owner)
-            except Exception:
-                self._restore_bytes(path, previous)
-                raise
-            return record
+                previous = path.read_bytes()
+            except (OSError, UnicodeError) as error:
+                raise _storage_error("lock read for unlock", error) from error
+
+            def apply() -> None:
+                try:
+                    path.unlink()
+                    self._fsync_directory(path.parent)
+                except (OSError, UnicodeError) as error:
+                    raise _storage_error("lock removal", error) from error
+
+            return self._run_transaction(
+                operation="unlock",
+                event="path.lock.unlocked",
+                path=path,
+                before=previous,
+                after=None,
+                actor=actor or owner,
+                record=record,
+                apply=apply,
+            )
 
     def recover(
         self,
@@ -914,6 +1617,7 @@ class PathLockStore:
         if ttl is not None:
             lease_seconds = ttl
         with self._mutation():
+            self._assert_no_pending_transaction()
             path, previous = self._find_target(target)
             current_now = self._now(now)
             if not _is_expired(previous.expires_at, current_now):
@@ -942,24 +1646,26 @@ class PathLockStore:
                 previous_expires_at=previous.expires_at,
                 recovery_reason=reason,
             )
-            old_bytes = path.read_bytes()
             try:
-                self._write_atomic(path, recovered)
-                self._post_event(
-                    "path.lock.recovered",
-                    recovered,
-                    actor=actor or owner,
-                    previous=previous,
-                    details={
-                        "previous_owner": previous.owner,
-                        "previous_expires_at": previous.expires_at,
-                        "recovery_reason": reason,
-                    },
-                )
-            except Exception:
-                self._restore_bytes(path, old_bytes)
-                raise
-            return recovered
+                old_bytes = path.read_bytes()
+            except (OSError, UnicodeError) as error:
+                raise _storage_error("lock read for recovery", error) from error
+            return self._run_transaction(
+                operation="recover",
+                event="path.lock.recovered",
+                path=path,
+                before=old_bytes,
+                after=self._json_bytes(recovered),
+                actor=actor or owner,
+                record=recovered,
+                previous=previous,
+                details={
+                    "previous_owner": previous.owner,
+                    "previous_expires_at": previous.expires_at,
+                    "recovery_reason": reason,
+                },
+                apply=lambda: self._write_atomic(path, recovered),
+            )
 
 
 # Module-level wrappers keep the public API easy to use from tests and clients.
@@ -1024,6 +1730,16 @@ def recover_paths(
         now=now,
         ttl=ttl,
     )
+def recover_pending(
+    channel: Path | str,
+    *,
+    root: Path | str | None = None,
+    actor: str = "recovery",
+    publication_resolution: str | None = None,
+) -> None:
+    PathLockStore(channel, root=root).recover_pending(
+        actor=actor, publication_resolution=publication_resolution
+    )
 
 
 # Short aliases mirror the command names without shadowing PathLockStore methods.
@@ -1048,6 +1764,7 @@ __all__ = [
     "lock_paths",
     "recover",
     "recover_paths",
+    "recover_pending",
     "unlock",
     "unlock_paths",
 ]

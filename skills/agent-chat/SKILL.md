@@ -35,7 +35,11 @@ As a Claude Code plugin, run `python ${CLAUDE_PLUGIN_ROOT}/chat.py <cmd>` (stand
 | Read what's new for me | `chat.py read review --as bob` |
 | Wait for a reply (0 tokens) | `chat.py wait review --as alice --timeout 900` |
 | Peek recent, keep cursor | `chat.py peek review -n 3` |
-| Claim a task atomically | `chat.py claim work task-12.md --as bob` |
+| Claim a task marker | `chat.py claim work task-12.md --as bob` |
+| Lock workspace paths | `chat.py lock review src/main.py --as alice --lease-seconds 300` |
+| Check path conflicts | `chat.py check review src/main.py` |
+| Release path lock | `chat.py unlock review <lock-id-or-path> --as alice` |
+| Recover stale lock | `chat.py recover review <lock-id-or-path> --as bob --reason "stale"` |
 
 Structured tasks use the same channel root and write authoritative JSON records
 under `<root>/<channel>/tasks/`; active lease records live under
@@ -116,6 +120,38 @@ crash or cleanup failure, access fails closed until
 `task recover-pending`/`LeaseStore.recover_pending()` explicitly rolls back
 or finishes the published transaction.
 
+
+Path locks coordinate exclusive access to workspace-relative files and directories:
+
+```text
+chat.py lock <channel> <paths...> --as <agent> [--lease-seconds 300]
+chat.py check <channel> <paths...> [--as <agent>]
+chat.py unlock <channel> <lock-id-or-path> --as <agent>
+chat.py recover <channel> <lock-id-or-path> --as <agent> \
+  --reason "stale session" [--lease-seconds 300]
+```
+
+`lock` and `recover` accept `--lease-seconds`, `--lease`, or `--ttl`. Target can
+be the lock ID or the exact normalized path. Normalization resolves
+workspace-relative paths, prevents traversal and root/channel/symlink escapes,
+applies platform case rules (case-insensitive on Windows), and rejects Windows
+reserved names, trailing dots/spaces, control characters, and lone surrogates.
+File/file collisions and directory/file overlaps conflict. Only the owner can
+unlock an active lock; expired locks require explicit `recover` recording
+`previous_owner`, `previous_expires_at`, and `recovery_reason`. Mutations use
+content-atomic file publishing, advisory file locks, and crash-safe transaction
+journaling. Path-lock errors exit nonzero with stable codes such as
+`PATH_LOCK_INVALID_PATH`, `PATH_LOCK_PATH_OUTSIDE_WORKSPACE`,
+`PATH_LOCK_CONFLICT`, `PATH_LOCK_RECOVERY_REQUIRED`,
+`PATH_LOCK_OWNER_MISMATCH`, `PATH_LOCK_NOT_FOUND`, `PATH_LOCK_NOT_STALE`,
+`PATH_LOCK_INVALID_OWNER`, `PATH_LOCK_INVALID_LOCK_ID`,
+`PATH_LOCK_INVALID_CHANNEL`, `PATH_LOCK_INVALID_REASON`,
+`PATH_LOCK_INVALID_DURATION`, `PATH_LOCK_INVALID_TIMESTAMP`,
+`PATH_LOCK_INVALID_RECORD`, `PATH_LOCK_STORAGE_INVALID`,
+`PATH_LOCK_STORAGE_ERROR`, `PATH_LOCK_TIMEOUT`,
+`PATH_LOCK_TRANSACTION_PENDING`, `PATH_LOCK_TRANSACTION_CLEANUP_FAILED`,
+`PATH_LOCK_TRANSACTION_INVALID`, `PATH_LOCK_AUDIT_FAILED`, and
+`PATH_LOCK_AUDIT_ROLLBACK_FAILED`.
 `--reply <seq>` threads a message to an earlier one. `python chat.py <cmd> --help` for all flags.
 
 In a Claude Code session, `/agent-chat` runs the read/reply loop for you using `$AGENT_CHAT_NAME`; a `SessionStart` hook also peeks your inbox and prints unread counts.

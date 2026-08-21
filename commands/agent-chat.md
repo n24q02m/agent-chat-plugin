@@ -120,6 +120,41 @@ task failures include `TASK_INVALID_COMMAND`, `TASK_INVALID_ARGUMENT`,
 `LEASE_TRANSACTION_INVALID`, `LEASE_TRANSACTION_NOT_FOUND`,
 `LEASE_TRANSACTION_RECOVERY_FAILED`,
 `LEASE_AUDIT_FAILED`, and `LEASE_AUDIT_ROLLBACK_FAILED`.
+
+Path locks coordinate exclusive access to files and directories across sessions:
+
+```text
+python ${CLAUDE_PLUGIN_ROOT}/chat.py lock <channel> <paths...> \
+  --as $AGENT_CHAT_NAME [--lease-seconds 300]
+python ${CLAUDE_PLUGIN_ROOT}/chat.py check <channel> <paths...> \
+  [--as $AGENT_CHAT_NAME]
+python ${CLAUDE_PLUGIN_ROOT}/chat.py unlock <channel> <lock-id-or-path> \
+  --as $AGENT_CHAT_NAME
+python ${CLAUDE_PLUGIN_ROOT}/chat.py recover <channel> <lock-id-or-path> \
+  --as $AGENT_CHAT_NAME --reason "stale session" [--lease-seconds 300]
+```
+
+`lock` and `recover` accept `--lease-seconds`, `--lease`, or `--ttl`. Target can
+be the lock ID or exact normalized path. Normalization resolves
+workspace-relative paths, prevents traversal and root/channel/symlink escapes,
+applies platform case rules (case-insensitive on Windows), and rejects Windows
+reserved names, trailing dots/spaces, control characters, and lone surrogates.
+File/file collisions and directory/file overlaps conflict. Only the owner can
+unlock an active lock; expired locks require explicit `recover` recording
+`previous_owner`, `previous_expires_at`, and `recovery_reason`. Mutations use
+content-atomic file publishing, advisory file locks, and crash-safe transaction
+journaling. Path-lock errors exit nonzero with stable codes such as
+`PATH_LOCK_INVALID_PATH`, `PATH_LOCK_PATH_OUTSIDE_WORKSPACE`,
+`PATH_LOCK_CONFLICT`, `PATH_LOCK_RECOVERY_REQUIRED`,
+`PATH_LOCK_OWNER_MISMATCH`, `PATH_LOCK_NOT_FOUND`, `PATH_LOCK_NOT_STALE`,
+`PATH_LOCK_INVALID_OWNER`, `PATH_LOCK_INVALID_LOCK_ID`,
+`PATH_LOCK_INVALID_CHANNEL`, `PATH_LOCK_INVALID_REASON`,
+`PATH_LOCK_INVALID_DURATION`, `PATH_LOCK_INVALID_TIMESTAMP`,
+`PATH_LOCK_INVALID_RECORD`, `PATH_LOCK_STORAGE_INVALID`,
+`PATH_LOCK_STORAGE_ERROR`, `PATH_LOCK_TIMEOUT`,
+`PATH_LOCK_TRANSACTION_PENDING`, `PATH_LOCK_TRANSACTION_CLEANUP_FAILED`,
+`PATH_LOCK_TRANSACTION_INVALID`, `PATH_LOCK_AUDIT_FAILED`, and
+`PATH_LOCK_AUDIT_ROLLBACK_FAILED`.
 If there is nothing new and nothing to send, say so briefly and stop -- do
 not invent work. If you need to start a new group chat, use
 `init <channel> --members a,b --topic "..."` first.

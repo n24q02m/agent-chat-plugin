@@ -6,11 +6,12 @@ import json
 import os
 import tempfile
 import unittest
+from unittest import mock
 from datetime import datetime, timezone
 from pathlib import Path
 from types import SimpleNamespace
-
 import chat
+import agent_chat.path_locks as path_locks
 from agent_chat.path_locks import PathLockError, PathLockStore
 
 
@@ -225,6 +226,184 @@ class PathLockStoreTests(unittest.TestCase):
             )
         self.assertIn("previous_owner=alice", output.getvalue())
         self.assertIn("alice session expired", output.getvalue())
+
+    def test_new_lock_is_published_with_content_atomic_no_overwrite(self):
+        with mock.patch.object(path_locks.os, "link", wraps=path_locks.os.link) as publish:
+            self.store.lock("alice", ["src/new.py"], lease_seconds=60)
+        self.assertTrue(publish.called)
+
+    def test_lock_publish_failure_is_stable_and_leaves_no_record(self):
+        with mock.patch.object(path_locks.os, "link", side_effect=OSError("publish failed")):
+            with self.assertRaises(PathLockError) as error:
+                self.store.lock("alice", ["src/new.py"], lease_seconds=60)
+        self.assertEqual(error.exception.code, "PATH_LOCK_STORAGE_ERROR")
+        self.assertEqual(self.store.list(), [])
+
+    def test_storage_symlink_swap_is_rejected_before_temp_publish(self):
+        outside = self.root.parent / (self.root.name + "-lock-outside")
+        outside.mkdir()
+        locks_dir = self.channel / "locks"
+        real_mkstemp = path_locks.tempfile.mkstemp
+
+        def tamper_mkstemp(*args, **kwargs):
+            locks_dir.mkdir(exist_ok=True)
+            fd, temporary_name = real_mkstemp(*args, **kwargs)
+            os.close(fd)
+            Path(temporary_name).unlink(missing_ok=True)
+            locks_dir.rmdir()
+            try:
+                locks_dir.symlink_to(outside, target_is_directory=True)
+            except (OSError, NotImplementedError) as error:
+                self.skipTest(f"symlink creation unavailable on this platform: {error}")
+            return real_mkstemp(*args, **kwargs)
+        try:
+            with mock.patch.object(path_locks.tempfile, "mkstemp", side_effect=tamper_mkstemp):
+                with self.assertRaises(PathLockError) as error:
+                    self.store.lock("alice", ["src/new.py"], lease_seconds=60)
+            self.assertEqual(error.exception.code, "PATH_LOCK_PATH_OUTSIDE_WORKSPACE")
+        finally:
+            if locks_dir.is_symlink():
+                locks_dir.unlink()
+            elif locks_dir.exists():
+                for child in locks_dir.iterdir():
+                    child.unlink()
+                locks_dir.rmdir()
+            outside.rmdir()
+
+    def test_contended_mutation_lock_is_not_reclaimed_from_mtime(self):
+        first = self.store._acquire_mutation_lock()
+        try:
+            os.utime(self.store.mutation_lock_path, (0, 0))
+            contender = PathLockStore(
+                self.channel,
+                root=self.root,
+                mutation_timeout=0.02,
+                mutation_stale=0,
+            )
+            with self.assertRaises(PathLockError) as error:
+                contender._acquire_mutation_lock()
+            self.assertEqual(error.exception.code, "PATH_LOCK_TIMEOUT")
+        finally:
+            self.store._release_mutation_lock(first)
+
+    def test_windows_aliases_are_rejected_for_missing_paths(self):
+        if os.name != "nt":
+            self.skipTest("Windows filename alias semantics do not apply on POSIX")
+        for requested in ("draft.", "draft ", "CON", "report?"):
+            with self.subTest(requested=requested):
+                with self.assertRaises(PathLockError) as error:
+                    self.store.lock("alice", [requested], lease_seconds=60)
+                self.assertEqual(error.exception.code, "PATH_LOCK_INVALID_PATH")
+
+    def test_control_and_surrogate_unicode_are_rejected_at_boundary(self):
+        for requested in ("draft" + chr(1), "draft" + chr(0xD800)):
+            with self.subTest(requested=requested):
+                with self.assertRaises(PathLockError) as error:
+                    self.store.lock("alice", [requested], lease_seconds=60)
+                self.assertEqual(error.exception.code, "PATH_LOCK_INVALID_PATH")
+
+    def test_interrupted_transaction_leaves_pending_marker_for_explicit_recovery(self):
+        record = self.store.lock("alice", ["src/new.py"], lease_seconds=60)
+        lock_path = self.channel / "locks" / f"{record.lock_id}.json"
+        raw_bytes = lock_path.read_bytes()
+        self.store._write_transaction(
+            {
+                "version": 1,
+                "transaction_id": "tx-1234",
+                "phase": "applied",
+                "operation": "lock",
+                "event": "path.locked",
+                "target": f"{record.lock_id}.json",
+                "before": None,
+                "after": self.store._encode_bytes(raw_bytes),
+                "actor": "alice",
+            }
+        )
+        pending = self.channel / "locks" / ".path-lock-transaction.json"
+        self.assertTrue(pending.exists())
+        with self.assertRaises(PathLockError) as blocked:
+            self.store.list()
+        self.assertEqual(blocked.exception.code, "PATH_LOCK_TRANSACTION_PENDING")
+
+        recovered = PathLockStore(self.channel, root=self.root)
+        recovered.recover_pending(actor="recovery")
+        self.assertFalse(pending.exists())
+        self.assertEqual(recovered.list(), [])
+
+    def test_cleanup_failure_after_audit_keeps_new_state_and_pending_marker(self):
+        with mock.patch.object(
+            self.store,
+            "_remove_transaction",
+            side_effect=PathLockError("PATH_LOCK_STORAGE_ERROR", "cleanup failed"),
+        ):
+            with self.assertRaises(PathLockError) as error:
+                self.store.lock("alice", ["src/new2.py"], lease_seconds=60)
+        self.assertEqual(error.exception.code, "PATH_LOCK_TRANSACTION_CLEANUP_FAILED")
+        self.assertTrue(error.exception.details.get("transaction_pending"))
+        self.assertTrue(self.store.transaction_path.exists())
+
+        with self.assertRaises(PathLockError) as blocked:
+            self.store.list()
+        self.assertEqual(blocked.exception.code, "PATH_LOCK_TRANSACTION_PENDING")
+
+        self.store.recover_pending(actor="recovery", publication_resolution="published")
+        self.assertFalse(self.store.transaction_path.exists())
+        self.assertEqual(len(self.store.list()), 1)
+
+    def test_rollback_failure_is_stable_and_preserves_pending_transaction(self):
+        with mock.patch.object(
+            self.store,
+            "_post_event",
+            side_effect=PathLockError("PATH_LOCK_AUDIT_FAILED", "injected audit failure"),
+        ), mock.patch.object(
+            self.store,
+            "_restore_bytes",
+            side_effect=OSError("rollback failed"),
+        ):
+            with self.assertRaises(PathLockError) as error:
+                self.store.lock("alice", ["src/new3.py"], lease_seconds=60)
+        self.assertEqual(error.exception.code, "PATH_LOCK_AUDIT_ROLLBACK_FAILED")
+        self.assertTrue((self.channel / "locks" / ".path-lock-transaction.json").exists())
+    def test_storage_permission_errors_are_mapped_for_cli(self):
+        stderr = io.StringIO()
+        with mock.patch.object(
+            path_locks.tempfile, "mkstemp", side_effect=PermissionError("denied")
+        ), contextlib.redirect_stderr(stderr):
+            with self.assertRaises(SystemExit) as exit_status:
+                chat.main(
+                    [
+                        "--root",
+                        str(self.root),
+                        "lock",
+                        "review",
+                        "src/new.py",
+                        "--as",
+                        "alice",
+                    ]
+                )
+        self.assertEqual(exit_status.exception.code, 1)
+        self.assertIn("PATH_LOCK_STORAGE_ERROR", stderr.getvalue())
+
+    def test_persisted_expiry_aliases_must_agree_and_recovery_fields_are_complete(self):
+        record = self.store.lock("alice", ["src/new.py"], lease_seconds=60)
+        lock_path = self.channel / "locks" / f"{record.lock_id}.json"
+        raw = json.loads(lock_path.read_text(encoding="utf-8"))
+        raw["lease_expires_at"] = raw["expires_at"]
+        lock_path.write_text(json.dumps(raw, indent=2) + "\n", encoding="utf-8")
+        self.assertEqual(self.store.load(record.lock_id).expires_at, raw["expires_at"])
+
+        raw["lease_expires_at"] = "2000-01-01T00:00:00+00:00"
+        lock_path.write_text(json.dumps(raw, indent=2) + "\n", encoding="utf-8")
+        with self.assertRaises(PathLockError) as error:
+            self.store.load(record.lock_id)
+        self.assertEqual(error.exception.code, "PATH_LOCK_INVALID_RECORD")
+
+        raw.pop("lease_expires_at")
+        raw["previous_owner"] = "alice"
+        lock_path.write_text(json.dumps(raw, indent=2) + "\n", encoding="utf-8")
+        with self.assertRaises(PathLockError) as error:
+            self.store.load(record.lock_id)
+        self.assertEqual(error.exception.code, "PATH_LOCK_INVALID_RECORD")
 
 if __name__ == "__main__":
     unittest.main()
