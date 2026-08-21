@@ -1250,9 +1250,10 @@ class LeaseStoreTests(unittest.TestCase):
         self.leases.claim("T-0001", "alice", lease_seconds=30)
         self.leases.claim("t-0001", "alice", lease_seconds=30)
 
+        records = self.leases.list()
         self.assertEqual(
-            sorted(path.name for path in (self.channel / "claims").glob("*.json")),
-            ["T-0001.alice.json", "t-0001.alice.json"],
+            sorted((record.task_id, record.owner) for record in records),
+            [("T-0001", "alice"), ("t-0001", "alice")],
         )
 
     def test_pending_recovery_rejects_distinct_previous_claim_records(self):
