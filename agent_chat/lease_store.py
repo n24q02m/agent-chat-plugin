@@ -359,6 +359,7 @@ class LeaseStore:
     def list(self) -> list[LeaseRecord]:
         self._assert_no_pending_transaction()
         with self.tasks._mutation_lock():
+            self._assert_no_pending_transaction()
             if not self.claims_dir.exists():
                 return []
             if not self.claims_dir.is_dir():
@@ -607,6 +608,38 @@ class LeaseStore:
             )
         return raw
 
+    def _decode_claim_rollback(
+        self,
+        payload: Any,
+        *,
+        filename: str,
+        task_id: str,
+        field: str,
+    ) -> bytes | None:
+        decoded = self._decode_bytes(payload)
+        if decoded is None:
+            return None
+        try:
+            raw = json.loads(decoded.decode("utf-8"))
+        except (UnicodeDecodeError, json.JSONDecodeError) as error:
+            raise LeaseError(
+                "LEASE_TRANSACTION_INVALID",
+                f"claim {field} payload is not valid JSON: {error}",
+                file=filename,
+            ) from error
+        record = LeaseRecord.from_dict(raw)
+        if (
+            record.task_id != task_id
+            or record.channel != self.channel.name
+            or f"{record.task_id}.{record.owner}.json" != filename
+        ):
+            raise LeaseError(
+                "LEASE_TRANSACTION_INVALID",
+                f"claim {field} payload does not match its journal filename",
+                file=filename,
+            )
+        return decoded
+
     def _assert_no_pending_transaction(self) -> None:
         pending = self._read_transaction()
         if pending is not None:
@@ -734,6 +767,7 @@ class LeaseStore:
                         "LEASE_TRANSACTION_INVALID",
                         "transaction journal task_before record mismatch",
                     )
+                claim_rollbacks: list[tuple[Path, bytes | None]] = []
                 for change in pending.get("claim_changes", []):
                     if not isinstance(change, dict) or "file" not in change:
                         raise LeaseError(
@@ -752,15 +786,41 @@ class LeaseStore:
                             "LEASE_TRANSACTION_INVALID",
                             f"claim change filename outside claims layout: {filename!r}",
                         )
+                    expected_prefix = f"{pending.get('task_id')}."
+                    if not filename.startswith(expected_prefix):
+                        raise LeaseError(
+                            "LEASE_TRANSACTION_INVALID",
+                            f"claim change filename does not belong to task: {filename!r}",
+                        )
+                    owner = filename[len(expected_prefix) : -len(".json")]
+                    _validate_identity(owner, "owner", "LEASE_INVALID_OWNER")
+                    if filename != f"{pending.get('task_id')}.{owner}.json":
+                        raise LeaseError(
+                            "LEASE_TRANSACTION_INVALID",
+                            f"claim change filename has an invalid owner: {filename!r}",
+                        )
                     claim_path = self.claims_dir / filename
-                    self._assert_inside_channel(claim_path)
-                self._atomic_write_bytes(task_path, task_before)
-                for change in reversed(pending["claim_changes"]):
-                    claim_path = self.claims_dir / change["file"]
-                    self._restore_claim(
+                    self._assert_exact_layout(
                         claim_path,
-                        self._decode_bytes(change.get("previous")),
+                        self.claims_dir,
+                        kind="claim",
                     )
+                    previous = self._decode_claim_rollback(
+                        change.get("previous"),
+                        filename=filename,
+                        task_id=expected_task_id,
+                        field="previous",
+                    )
+                    self._decode_claim_rollback(
+                        change.get("next"),
+                        filename=filename,
+                        task_id=expected_task_id,
+                        field="next",
+                    )
+                    claim_rollbacks.append((claim_path, previous))
+                self._atomic_write_bytes(task_path, task_before)
+                for claim_path, previous in reversed(claim_rollbacks):
+                    self._restore_claim(claim_path, previous)
                 restored = self.tasks._read_path(task_path)
                 self.tasks._post_event(
                     "lease.transaction.recovered",

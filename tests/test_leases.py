@@ -621,5 +621,114 @@ class LeaseStoreTests(unittest.TestCase):
             self.leases.recover_pending(actor="recovery")
         self.assertEqual(error.exception.code, "LEASE_TRANSACTION_INVALID")
 
+    def test_list_rechecks_pending_marker_inside_mutation_lock(self):
+        self.create_task()
+        original_guard = self.leases._assert_no_pending_transaction
+        calls = []
+
+        def inject_pending_marker():
+            calls.append(True)
+            if len(calls) == 1:
+                self.leases.claims_dir.mkdir()
+                task_before = self.leases._encode_bytes(
+                    (self.channel / "tasks" / "T-0001.json").read_bytes()
+                )
+                self.leases.transaction_path.write_text(
+                    json.dumps(
+                        {
+                            "version": 1,
+                            "task_id": "T-0001",
+                            "task_file": "tasks/T-0001.json",
+                            "task_before": task_before,
+                            "claim_changes": [],
+                            "event": "lease.claimed",
+                        },
+                        indent=2,
+                    )
+                    + "\n",
+                    encoding="utf-8",
+                )
+                return
+            original_guard()
+
+        self.leases._assert_no_pending_transaction = inject_pending_marker
+        with self.assertRaises(LeaseError) as error:
+            self.leases.list()
+        self.assertEqual(error.exception.code, "LEASE_TRANSACTION_PENDING")
+        self.assertEqual(len(calls), 2)
+
+    def test_pending_transaction_rejects_claim_for_other_task_or_owner(self):
+        self.create_task()
+        task_before = self.leases._encode_bytes(
+            (self.channel / "tasks" / "T-0001.json").read_bytes()
+        )
+        self.leases.claims_dir.mkdir()
+        self.leases.transaction_path.write_text(
+            json.dumps(
+                {
+                    "version": 1,
+                    "task_id": "T-0001",
+                    "task_file": "tasks/T-0001.json",
+                    "task_before": task_before,
+                    "claim_changes": [
+                        {
+                            "file": "T-0002.bob.json",
+                            "previous": None,
+                            "next": None,
+                        }
+                    ],
+                    "event": "lease.claimed",
+                },
+                indent=2,
+            )
+            + "\n",
+            encoding="utf-8",
+        )
+
+        with self.assertRaises(LeaseError) as error:
+            self.leases.recover_pending(actor="recovery")
+        self.assertEqual(error.exception.code, "LEASE_TRANSACTION_INVALID")
+
+    def test_pending_transaction_preflights_claim_rollback_bytes(self):
+        self.create_task()
+        task_path = self.channel / "tasks" / "T-0001.json"
+        task_before = self.leases._encode_bytes(
+            json.dumps(self.task_data(), separators=(",", ":")).encode("utf-8")
+        )
+        current = self.task_data(
+            status="in_progress",
+            owner="alice",
+            lease_expires_at="2026-08-21T12:30:00+00:00",
+        )
+        task_path.write_text(json.dumps(current, indent=2) + "\n", encoding="utf-8")
+        original_task_bytes = task_path.read_bytes()
+        self.leases.claims_dir.mkdir()
+        self.leases.transaction_path.write_text(
+            json.dumps(
+                {
+                    "version": 1,
+                    "task_id": "T-0001",
+                    "task_file": "tasks/T-0001.json",
+                    "task_before": task_before,
+                    "claim_changes": [
+                        {
+                            "file": "T-0001.alice.json",
+                            "previous": "not-base64",
+                            "next": None,
+                        }
+                    ],
+                    "event": "lease.claimed",
+                },
+                indent=2,
+            )
+            + "\n",
+            encoding="utf-8",
+        )
+
+        with self.assertRaises(LeaseError) as error:
+            self.leases.recover_pending(actor="recovery")
+        self.assertEqual(error.exception.code, "LEASE_TRANSACTION_INVALID")
+        self.assertEqual(task_path.read_bytes(), original_task_bytes)
+
 if __name__ == "__main__":
     unittest.main()
