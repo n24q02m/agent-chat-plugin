@@ -405,6 +405,8 @@ class TaskStore:
                 )
             records = self._read_all()
             self._validate_graph(records + [candidate])
+            if candidate.status in {"in_progress", "done"}:
+                self._assert_dependencies_ready(candidate, records + [candidate])
             self._ensure_tasks_dir()
             self._atomic_write(path, candidate)
             try:

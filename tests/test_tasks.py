@@ -114,6 +114,22 @@ class TaskStoreTests(unittest.TestCase):
         self.assertEqual(error.exception.code, "TASK_UNKNOWN_DEPENDENCY")
         self.assertFalse((self.channel / "tasks" / "T-0002.json").exists())
 
+    def test_create_rejects_non_ready_dependency_status(self):
+        self.store.create(self.make_task(id="T-0001"), actor="alice")
+
+        with self.assertRaises(TaskValidationError) as error:
+            self.store.create(
+                self.make_task(
+                    id="T-0002",
+                    status="in_progress",
+                    depends_on=["T-0001"],
+                ),
+                actor="alice",
+            )
+
+        self.assertEqual(error.exception.code, "TASK_DEPENDENCY_NOT_READY")
+        self.assertFalse((self.channel / "tasks" / "T-0002.json").exists())
+
     def test_dependency_cycles_are_rejected(self):
         self.store.create(self.make_task(id="T-0001"), actor="alice")
         self.store.create(
