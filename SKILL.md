@@ -38,24 +38,40 @@ Run via `python <skill>/chat.py <cmd>`. Root = `$AGENT_CHAT_ROOT` or `~/agent-ch
 | Claim a task atomically | `chat.py claim work task-12.md --as bob` |
 
 Structured tasks use the same channel root and write authoritative JSON records
-under `<root>/<channel>/tasks/`; every successful mutation also posts an audit
-event through the existing message protocol:
+under `<root>/<channel>/tasks/`; active lease records live under
+`<root>/<channel>/claims/<task-id>.<owner>.json`. Every successful task or lease
+mutation also posts an audit event through the existing message protocol:
 
 ```text
 chat.py task create <channel> <task-id> --from <agent> --title <title>
 chat.py task list <channel>
 chat.py task show <channel> <task-id>
 chat.py task update <channel> <task-id> --as <agent> [fields...]
+chat.py task claim <channel> <task-id> --as <agent> --lease-seconds 300
+chat.py task renew <channel> <task-id> --as <agent> --lease-seconds 300
 chat.py task done <channel> <task-id> --as <agent>
 chat.py task block <channel> <task-id> --as <agent>
 chat.py task release <channel> <task-id> --as <agent>
+chat.py task recover <channel> <task-id> --as <agent> \
+  --reason "stale session" --lease-seconds 300
 ```
+
+`claim`, `renew`, and `recover` accept `--lease-seconds`, `--lease`, or
+`--ttl`; the value must be a positive finite duration. `claim` advances a ready
+task to `in_progress`, assigns the owner, and writes its expiry atomically with
+the claim record. Only the owner can renew, release, or complete an unexpired
+claim. `task done` clears an active claim atomically; when no claim exists it
+preserves the direct Task 3 transition. `task release` similarly preserves the
+unleased Task 3 transition. An expired claim is never silently stolen:
+`task recover` requires a new owner and non-empty reason and records
+`previous_owner`, `previous_lease_expires_at`, and `recovery_reason`.
 
 `create` accepts `--owner`, `--depends-on`, `--files-hint`, `--acceptance`, and
 `--branch`. Repeat list options to add multiple values. `update` accepts
 `--title`, `--owner`, `--depends-on`, `--files-hint`, `--acceptance`,
 `--branch`, and `--status`; use `--clear-owner` or `--clear-branch` to set
-nullable fields back to `null`. List values may also be comma-separated.
+nullable fields back to `null`. Generic updates cannot mutate an active lease;
+use the lease commands instead. List values may also be comma-separated.
 
 Task statuses are `open`, `in_progress`, `blocked`, `done`, and `cancelled`.
 `done` and `cancelled` are terminal. Transitions allow `open` -> `in_progress` |
@@ -68,14 +84,26 @@ idempotent `done`) to `done`; `task block` moves `open`, `in_progress`, or
 every ID in `depends_on` has a task record whose status is `done`. Readiness is
 computed from task JSON records, never from message text.
 
-Task failures are nonzero (exit status 2) and include one stable code:
-`TASK_INVALID_COMMAND`, `TASK_INVALID_ARGUMENT`, `TASK_INVALID_CHANNEL`,
-`TASK_CHANNEL_NOT_FOUND`, `TASK_NOT_FOUND`, `TASK_ALREADY_EXISTS`,
-`TASK_INVALID_STATUS`, `TASK_INVALID_UPDATE`, `TASK_INVALID_TRANSITION`,
-`TASK_DEPENDENCY_NOT_READY`, `TASK_UNKNOWN_DEPENDENCY`,
-`TASK_DEPENDENCY_CYCLE`, `TASK_PATH_OUTSIDE_WORKSPACE`,
-`TASK_LOCK_TIMEOUT`, `TASK_IO_ERROR`, or `TASK_AUDIT_FAILED`. Task writes are
-lock-protected, atomic, and rolled back if the audit event cannot be written.
+Task and lease failures are nonzero (exit status 2) and include one stable code.
+Task codes include `TASK_INVALID_COMMAND`, `TASK_INVALID_ARGUMENT`,
+`TASK_INVALID_CHANNEL`, `TASK_CHANNEL_NOT_FOUND`, `TASK_NOT_FOUND`,
+`TASK_ALREADY_EXISTS`, `TASK_INVALID_STATUS`, `TASK_INVALID_UPDATE`,
+`TASK_INVALID_TRANSITION`, `TASK_DEPENDENCY_NOT_READY`,
+`TASK_UNKNOWN_DEPENDENCY`, `TASK_DEPENDENCY_CYCLE`,
+`TASK_PATH_OUTSIDE_WORKSPACE`, `TASK_LOCK_TIMEOUT`, `TASK_IO_ERROR`, and
+`TASK_AUDIT_FAILED`. Lease codes include `LEASE_CONFLICT`,
+`LEASE_RECOVERY_REQUIRED`, `LEASE_OWNER_MISMATCH`, `LEASE_NOT_EXPIRED`,
+`LEASE_NOT_FOUND`, `LEASE_INCONSISTENT`, `LEASE_MUTATION_REQUIRED`,
+`LEASE_INVALID_OWNER`, `LEASE_INVALID_TASK_ID`, `LEASE_INVALID_CHANNEL`,
+`LEASE_INVALID_REASON`, `LEASE_INVALID_DURATION`, `LEASE_INVALID_TIMESTAMP`,
+`LEASE_INVALID_RECORD`, `LEASE_REQUIRED_FIELD_MISSING`, `LEASE_UNKNOWN_FIELD`,
+`LEASE_RECORD_ID_MISMATCH`, `LEASE_STORAGE_INVALID`,
+`LEASE_PATH_OUTSIDE_WORKSPACE`, `LEASE_TRANSACTION_PENDING`,
+`LEASE_TRANSACTION_INVALID`, `LEASE_TRANSACTION_NOT_FOUND`,
+`LEASE_TRANSACTION_RECOVERY_FAILED`, `LEASE_AUDIT_FAILED`, and
+`LEASE_AUDIT_ROLLBACK_FAILED`. Lease writes use an atomic transaction marker;
+after a crash, access fails closed until `LeaseStore.recover_pending()` rolls
+the prior records back explicitly.
 
 `--reply <seq>` threads a message to an earlier one. `python chat.py <cmd> --help` for all flags.
 

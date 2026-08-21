@@ -471,6 +471,50 @@ class TaskStore:
         with self._mutation_lock():
             return self._read_snapshot()
 
+    def _assert_lease_update_allowed(
+        self,
+        current: TaskRecord,
+        updates: Mapping[str, Any],
+        actor: str | None,
+    ) -> None:
+        """Prevent generic updates from bypassing an active lease."""
+
+        from .lease_store import LeaseError, LeaseStore, _is_expired
+
+        leases = LeaseStore(self.channel, root=self.root)
+        claim = leases._current_claim(current.id)
+        if claim is None:
+            leases._assert_consistent(current, None)
+            return
+        _, record = claim
+        now = leases._now()
+        if _is_expired(record.lease_expires_at, now):
+            raise LeaseError(
+                "LEASE_RECOVERY_REQUIRED",
+                f"expired lease for task {current.id} requires explicit recovery",
+                task_id=current.id,
+                previous_owner=record.owner,
+                previous_lease_expires_at=record.lease_expires_at,
+            )
+        if actor != record.owner:
+            raise LeaseError(
+                "LEASE_OWNER_MISMATCH",
+                f"lease for task {current.id} belongs to {record.owner}",
+                task_id=current.id,
+                owner=actor,
+                current_owner=record.owner,
+            )
+        protected = {"owner", "lease_expires_at"}.intersection(updates)
+        status_change = "status" in updates and updates["status"] != current.status
+        if protected or status_change:
+            raise LeaseError(
+                "LEASE_MUTATION_REQUIRED",
+                f"task {current.id} must be changed through its lease operation",
+                task_id=current.id,
+                protected_fields=sorted(
+                    protected | ({"status"} if status_change else set())
+                ),
+            )
     def update(
         self,
         task_id: str,
@@ -498,6 +542,7 @@ class TaskStore:
 
         with self._mutation_lock():
             current = self._read_path(path)
+            self._assert_lease_update_allowed(current, updates, actor)
             if "id" in updates and updates["id"] != current.id:
                 raise TaskValidationError(
                     "TASK_ID_IMMUTABLE", "task id cannot be changed"

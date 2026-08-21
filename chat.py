@@ -654,18 +654,9 @@ def _task_transition(root: Path, a, status: str, action: str):
 
 
 def cmd_task_done(root: Path, a):
-    from agent_chat.lease_store import LeaseError
-
     store = _lease_store(root, a.channel)
-    try:
-        with contextlib.redirect_stdout(io.StringIO()):
-            task = store.complete(a.task_id, _task_actor(a))
-    except LeaseError as error:
-        # Preserve Task 3's direct transition when no active lease exists.
-        if error.code != "LEASE_NOT_FOUND":
-            raise
-        _task_transition(root, a, "done", "done")
-        return
+    with contextlib.redirect_stdout(io.StringIO()):
+        task = store.complete_or_done(a.task_id, _task_actor(a))
     _print_task_result("done", task)
 
 
@@ -674,19 +665,9 @@ def cmd_task_block(root: Path, a):
 
 
 def cmd_task_release(root: Path, a):
-    from agent_chat.lease_store import LeaseError
-
     store = _lease_store(root, a.channel)
-    try:
-        with contextlib.redirect_stdout(io.StringIO()):
-            task = store.release(a.task_id, _task_actor(a))
-    except LeaseError as error:
-        # Preserve Task 3's unowned status-release behavior.  Real leases,
-        # including expired ones, must go through lease owner checks.
-        if error.code != "LEASE_NOT_FOUND":
-            raise
-        _task_transition(root, a, "open", "released")
-        return
+    with contextlib.redirect_stdout(io.StringIO()):
+        task = store.release_or_open(a.task_id, _task_actor(a))
     _print_task_result("released", task)
 
 

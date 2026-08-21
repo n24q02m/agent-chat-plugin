@@ -328,5 +328,74 @@ class LeaseStoreTests(unittest.TestCase):
         self.assertEqual(output, "done task T-0001 [done]\n")
         self.assertEqual(list((self.channel / "claims").glob("*.json")), [])
 
+    def test_generic_task_update_cannot_bypass_active_lease(self):
+        self.create_task()
+        self.leases.claim("T-0001", "alice", lease_seconds=30)
+
+        with self.assertRaises(LeaseError) as error:
+            self.tasks.update("T-0001", actor="alice", status="done")
+        self.assertEqual(error.exception.code, "LEASE_MUTATION_REQUIRED")
+
+        with self.assertRaises(LeaseError) as owner_error:
+            self.tasks.update("T-0001", actor="alice", owner="bob")
+        self.assertEqual(owner_error.exception.code, "LEASE_MUTATION_REQUIRED")
+        self.assertEqual(self.tasks.show("T-0001").owner, "alice")
+
+    def test_claim_list_rejects_symlinked_record_outside_channel(self):
+        self.create_task()
+        claims = self.channel / "claims"
+        claims.mkdir()
+        outside = Path(self.temp_dir.name).parent / (self.root.name + "-lease-outside")
+        outside.mkdir()
+        external = outside / "claim.json"
+        external.write_text("{}", encoding="utf-8")
+        linked = claims / "T-0001.alice.json"
+        try:
+            linked.symlink_to(external)
+        except (OSError, NotImplementedError):
+            linked.unlink(missing_ok=True)
+            external.unlink(missing_ok=True)
+            outside.rmdir()
+            self.skipTest("symlink creation is unavailable on this platform")
+        try:
+            with self.assertRaises(LeaseError) as error:
+                self.leases.list()
+            self.assertEqual(error.exception.code, "LEASE_PATH_OUTSIDE_WORKSPACE")
+        finally:
+            linked.unlink(missing_ok=True)
+            external.unlink(missing_ok=True)
+            outside.rmdir()
+
+    def test_oversized_lease_duration_has_stable_error(self):
+        self.create_task()
+        with self.assertRaises(LeaseError) as error:
+            self.leases.claim("T-0001", "alice", lease_seconds=1e308)
+        self.assertEqual(error.exception.code, "LEASE_INVALID_DURATION")
+        self.assertEqual(self.tasks.show("T-0001").status, "open")
+
+    def test_crashed_transaction_fails_closed_until_explicit_recovery(self):
+        self.create_task()
+        original_atomic_write = self.leases.tasks._atomic_write
+
+        def crash_after_task_write(path, task):
+            original_atomic_write(path, task)
+            raise SystemExit("simulated process crash")
+
+        self.leases.tasks._atomic_write = crash_after_task_write
+        with self.assertRaises(SystemExit):
+            self.leases.claim("T-0001", "alice", lease_seconds=30)
+
+        pending = LeaseStore(self.channel)
+        with self.assertRaises(LeaseError) as error:
+            pending.load("T-0001")
+        self.assertEqual(error.exception.code, "LEASE_TRANSACTION_PENDING")
+
+        pending.recover_pending(actor="recovery")
+        restored = self.tasks.show("T-0001")
+        self.assertEqual((restored.status, restored.owner), ("open", None))
+        self.assertEqual(list((self.channel / "claims").glob("*.json")), [])
+        self.leases.tasks._atomic_write = original_atomic_write
+        self.leases.claim("T-0001", "alice", lease_seconds=30)
+
 if __name__ == "__main__":
     unittest.main()

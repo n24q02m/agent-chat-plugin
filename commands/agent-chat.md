@@ -25,7 +25,9 @@ is unset). All commands below run `python ${CLAUDE_PLUGIN_ROOT}/chat.py <cmd>`.
    idle, then prints the new message(s) when they arrive.
 
 
-Structured task board commands use the same root/channel as messages:
+Structured task board commands use the same root/channel as messages. Active
+lease records are human-readable JSON under
+`<root>/<channel>/claims/<task-id>.<owner>.json`:
 
 ```text
 python ${CLAUDE_PLUGIN_ROOT}/chat.py task create <channel> <task-id> \
@@ -34,13 +36,37 @@ python ${CLAUDE_PLUGIN_ROOT}/chat.py task list <channel>
 python ${CLAUDE_PLUGIN_ROOT}/chat.py task show <channel> <task-id>
 python ${CLAUDE_PLUGIN_ROOT}/chat.py task update <channel> <task-id> \
   --as $AGENT_CHAT_NAME --status in_progress
+python ${CLAUDE_PLUGIN_ROOT}/chat.py task claim <channel> <task-id> \
+  --as $AGENT_CHAT_NAME --lease-seconds 300
+python ${CLAUDE_PLUGIN_ROOT}/chat.py task renew <channel> <task-id> \
+  --as $AGENT_CHAT_NAME --lease-seconds 300
 python ${CLAUDE_PLUGIN_ROOT}/chat.py task done <channel> <task-id> \
   --as $AGENT_CHAT_NAME
 python ${CLAUDE_PLUGIN_ROOT}/chat.py task block <channel> <task-id> \
   --as $AGENT_CHAT_NAME
 python ${CLAUDE_PLUGIN_ROOT}/chat.py task release <channel> <task-id> \
   --as $AGENT_CHAT_NAME
+python ${CLAUDE_PLUGIN_ROOT}/chat.py task recover <channel> <task-id> \
+  --as $AGENT_CHAT_NAME --reason "stale session" --lease-seconds 300
 ```
+
+`claim`, `renew`, and `recover` accept `--lease-seconds`, `--lease`, or
+`--ttl`. The duration must be positive and finite. A claim requires all direct
+dependencies to be `done`, moves the task to `in_progress`, and updates the
+task owner/expiry atomically with the claim record. Only the owner can renew,
+release, or complete an unexpired claim. `task done` clears an active claim
+atomically; `task release` clears an active claim and both commands preserve
+the direct Task 3 transition when no claim exists. Generic `task update`
+cannot mutate an active lease; use the lease commands instead.
+
+An expired claim is never silently stolen. `task claim` returns
+`LEASE_RECOVERY_REQUIRED`; `task recover` requires a new owner and non-empty
+`--reason`, and records `previous_owner`, `previous_lease_expires_at`, and
+`recovery_reason` before assigning the new lease. Lease mutations emit
+auditable `lease.claimed`, `lease.renewed`, `lease.released`,
+`lease.recovered`, or `lease.completed` events. If a process crashes during a
+two-file mutation, access fails closed with `LEASE_TRANSACTION_PENDING` until
+the explicit `LeaseStore.recover_pending()` rollback is performed.
 
 `create` starts every task as `open`; repeat `--depends-on`, `--files-hint`,
 or `--acceptance` for multiple values (comma-separated values are also
@@ -62,19 +88,29 @@ Successful commands have deterministic output, for example:
 
 ```text
 created task T-0001 [open]
-T-0001  open  -  -  Document the review flow
-dependencies: ready
+claimed task T-0001 [in_progress]
+renewed task T-0001 [in_progress]
+done task T-0001 [done]
 ```
 
 Task failures exit nonzero (exit status 2) and include a stable code. Common
-failures include `TASK_INVALID_COMMAND`, `TASK_INVALID_ARGUMENT`,
+task failures include `TASK_INVALID_COMMAND`, `TASK_INVALID_ARGUMENT`,
 `TASK_INVALID_CHANNEL`, `TASK_CHANNEL_NOT_FOUND`, `TASK_NOT_FOUND`,
 `TASK_ALREADY_EXISTS`, `TASK_INVALID_STATUS`, `TASK_INVALID_UPDATE`,
 `TASK_INVALID_TRANSITION`, `TASK_DEPENDENCY_NOT_READY`,
 `TASK_UNKNOWN_DEPENDENCY`, `TASK_DEPENDENCY_CYCLE`,
 `TASK_PATH_OUTSIDE_WORKSPACE`, `TASK_LOCK_TIMEOUT`, `TASK_IO_ERROR`, and
-`TASK_AUDIT_FAILED`. Task mutations produce auditable task events in the
-channel.
+`TASK_AUDIT_FAILED`. Lease failures include `LEASE_CONFLICT`,
+`LEASE_RECOVERY_REQUIRED`, `LEASE_OWNER_MISMATCH`, `LEASE_NOT_EXPIRED`,
+`LEASE_NOT_FOUND`, `LEASE_INCONSISTENT`, `LEASE_MUTATION_REQUIRED`,
+`LEASE_INVALID_OWNER`, `LEASE_INVALID_TASK_ID`, `LEASE_INVALID_CHANNEL`,
+`LEASE_INVALID_REASON`, `LEASE_INVALID_DURATION`, `LEASE_INVALID_TIMESTAMP`,
+`LEASE_INVALID_RECORD`, `LEASE_REQUIRED_FIELD_MISSING`, `LEASE_UNKNOWN_FIELD`,
+`LEASE_RECORD_ID_MISMATCH`, `LEASE_STORAGE_INVALID`,
+`LEASE_PATH_OUTSIDE_WORKSPACE`, `LEASE_TRANSACTION_PENDING`,
+`LEASE_TRANSACTION_INVALID`, `LEASE_TRANSACTION_NOT_FOUND`,
+`LEASE_TRANSACTION_RECOVERY_FAILED`, `LEASE_AUDIT_FAILED`, and
+`LEASE_AUDIT_ROLLBACK_FAILED`.
 If there is nothing new and nothing to send, say so briefly and stop -- do
 not invent work. If you need to start a new group chat, use
 `init <channel> --members a,b --topic "..."` first.
