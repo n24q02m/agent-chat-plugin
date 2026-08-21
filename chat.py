@@ -62,6 +62,149 @@ def _frontmatter_value(value) -> str:
 class AgentChatError(Exception):
     pass
 
+EVENT_SCHEMA_VERSION = 1
+EVENT_TYPES = ("capability", "status")
+CAPABILITY_PRIMITIVES = (
+    "messages",
+    "cursors",
+    "wait",
+    "tasks",
+    "dependencies",
+    "leases",
+    "path_locks",
+    "state_summary",
+)
+STATUS_VALUES = ("ready", "busy", "idle", "blocked", "stopped")
+
+
+class AdapterEventError(AgentChatError):
+    """Stable validation error for adapter-neutral events."""
+
+    def __init__(self, code: str, message: str):
+        self.code = code
+        super().__init__(f"{code}: {message}")
+
+
+def _event_text(value: object, field: str) -> str:
+    if not isinstance(value, str) or not value or any(
+        ord(char) < 32 or 0x7F <= ord(char) <= 0x9F
+        or 0xD800 <= ord(char) <= 0xDFFF
+        for char in value
+    ):
+        raise AdapterEventError("EVENT_INVALID_TEXT", f"{field} is invalid")
+    try:
+        value.encode("utf-8")
+    except UnicodeEncodeError as error:
+        raise AdapterEventError("EVENT_INVALID_TEXT", f"{field} is invalid") from error
+    try:
+        _check_safe_name(value, field)
+    except AgentChatError as error:
+        raise AdapterEventError("EVENT_INVALID_TEXT", str(error)) from error
+    return value
+
+
+def _event_timestamp(value: object) -> str:
+    if not isinstance(value, str):
+        raise AdapterEventError("EVENT_INVALID_TIMESTAMP", "ts must be a string")
+    try:
+        parsed = _dt.datetime.fromisoformat(
+            value[:-1] + "+00:00" if value.endswith(("Z", "z")) else value
+        )
+    except (TypeError, ValueError) as error:
+        raise AdapterEventError("EVENT_INVALID_TIMESTAMP", "ts must be ISO-8601") from error
+    if parsed.tzinfo is None:
+        raise AdapterEventError("EVENT_INVALID_TIMESTAMP", "ts must include an offset")
+    return value
+
+
+def validate_adapter_event(value: object) -> dict:
+    if not isinstance(value, dict):
+        raise AdapterEventError("EVENT_INVALID_RECORD", "event must be an object")
+    event_type = value.get("event")
+    if value.get("schema_version") != EVENT_SCHEMA_VERSION or isinstance(
+        value.get("schema_version"), bool
+    ):
+        raise AdapterEventError("EVENT_UNSUPPORTED_VERSION", "schema_version must be 1")
+    if event_type not in EVENT_TYPES:
+        raise AdapterEventError("EVENT_INVALID_TYPE", "event must be capability or status")
+    allowed = {"schema_version", "event", "agent", "harness", "ts"}
+    if event_type == "capability":
+        allowed.add("primitives")
+    else:
+        allowed.update({"status", "detail"})
+    unknown = sorted(set(value) - allowed)
+    if unknown:
+        raise AdapterEventError("EVENT_UNKNOWN_FIELD", ", ".join(unknown))
+    for required in ("agent", "harness"):
+        if required not in value:
+            raise AdapterEventError("EVENT_REQUIRED_FIELD_MISSING", required)
+        _event_text(value[required], required)
+    if "ts" not in value:
+        raise AdapterEventError("EVENT_REQUIRED_FIELD_MISSING", "ts")
+    _event_timestamp(value["ts"])
+    normalized = dict(value)
+    if event_type == "capability":
+        primitives = value.get("primitives")
+        if not isinstance(primitives, list) or not primitives:
+            raise AdapterEventError("EVENT_INVALID_PRIMITIVES", "primitives must be non-empty")
+        if len(set(primitives)) != len(primitives):
+            raise AdapterEventError("EVENT_DUPLICATE_PRIMITIVE", "primitives must be unique")
+        for primitive in primitives:
+            if primitive not in CAPABILITY_PRIMITIVES:
+                raise AdapterEventError("EVENT_UNKNOWN_PRIMITIVE", str(primitive))
+        normalized["primitives"] = list(primitives)
+    else:
+        status = value.get("status")
+        if status not in STATUS_VALUES:
+            raise AdapterEventError("EVENT_INVALID_STATUS", str(status))
+        if "detail" in value:
+            detail = value["detail"]
+            if not isinstance(detail, str) or any(
+                ord(char) < 32 or 0xD800 <= ord(char) <= 0xDFFF for char in detail
+            ):
+                raise AdapterEventError("EVENT_INVALID_TEXT", "detail is invalid")
+    return normalized
+
+
+def make_capability_event(
+    agent: str,
+    harness: str,
+    *,
+    primitives: list[str] | None = None,
+    timestamp: str | None = None,
+) -> dict:
+    return validate_adapter_event(
+        {
+            "schema_version": EVENT_SCHEMA_VERSION,
+            "event": "capability",
+            "agent": agent,
+            "harness": harness,
+            "ts": timestamp or now_iso(),
+            "primitives": list(primitives or CAPABILITY_PRIMITIVES),
+        }
+    )
+
+
+def make_status_event(
+    agent: str,
+    harness: str,
+    status: str,
+    *,
+    detail: str | None = None,
+    timestamp: str | None = None,
+) -> dict:
+    event = {
+        "schema_version": EVENT_SCHEMA_VERSION,
+        "event": "status",
+        "agent": agent,
+        "harness": harness,
+        "ts": timestamp or now_iso(),
+        "status": status,
+    }
+    if detail is not None:
+        event["detail"] = detail
+    return validate_adapter_event(event)
+
 
 def die(msg: str, code: int = 1):
     print(f"agent-chat: {msg}", file=sys.stderr)
@@ -589,6 +732,68 @@ def cmd_compact(root: Path, a):
     else:
         print(f"compacted state for {a.channel} -> {a.channel}/state.md (open_tasks={len(summary.open_tasks)}, locks={len(summary.path_locks)}, decisions={len(summary.decisions)})")
 
+def _event_body(path: Path) -> dict:
+    raw = path.read_text(encoding="utf-8")
+    parts = raw.split("---", 2)
+    body = parts[2].strip() if len(parts) >= 3 else ""
+    try:
+        return validate_adapter_event(json.loads(body))
+    except (json.JSONDecodeError, UnicodeError) as error:
+        raise AdapterEventError("EVENT_MALFORMED_BODY", path.name) from error
+
+
+def cmd_event_post(root: Path, a):
+    event_type = a.event_type
+    if event_type == "capability":
+        primitives = None
+        if a.primitives:
+            primitives = [
+                value.strip()
+                for item in a.primitives
+                for value in item.split(",")
+                if value.strip()
+            ]
+        event = make_capability_event(
+            a.sender,
+            a.harness,
+            primitives=primitives,
+        )
+    else:
+        event = make_status_event(
+            a.sender,
+            a.harness,
+            a.status,
+            detail=a.detail,
+        )
+    args = argparse.Namespace(
+        channel=a.channel,
+        sender=a.sender,
+        to="all",
+        reply=None,
+        status=f"event.{event['event']}",
+        title=f"event:{event['event']}",
+        body=json.dumps(event, ensure_ascii=False, sort_keys=True, separators=(",", ":")),
+        body_file=None,
+    )
+    with contextlib.redirect_stdout(io.StringIO()):
+        cmd_post(root, args)
+    print(f"posted event {event['event']} -> {a.channel}")
+
+
+def cmd_event_read(root: Path, a):
+    channel = require_channel(root, a.channel)
+    expected = getattr(a, "event_type", None)
+    for path in message_files(channel):
+        meta = parse_frontmatter(path)
+        status = meta.get("status", "")
+        if not status.startswith("event."):
+            continue
+        event = _event_body(path)
+        if expected and event["event"] != expected:
+            continue
+        print(json.dumps(event, ensure_ascii=False, sort_keys=True))
+
+
 
 def cmd_lock(root: Path, a):
     store = _path_lock_store(root, a.channel)
@@ -889,6 +1094,22 @@ def build_parser() -> argparse.ArgumentParser:
     s.add_argument("--body-file")
     s.set_defaults(func=cmd_post)
 
+    event = sub.add_parser("event", help="post/read adapter-neutral events")
+    event_sub = event.add_subparsers(dest="event_cmd", required=True)
+    s = event_sub.add_parser("post", help="post a capability or status event")
+    s.add_argument("channel")
+    s.add_argument("--from", dest="sender", required=True)
+    s.add_argument("--type", dest="event_type", choices=EVENT_TYPES, required=True)
+    s.add_argument("--harness", required=True)
+    s.add_argument("--status", choices=STATUS_VALUES)
+    s.add_argument("--detail")
+    s.add_argument("--primitives", action="append")
+    s.set_defaults(func=cmd_event_post)
+    s = event_sub.add_parser("read", help="read validated adapter-neutral events")
+    s.add_argument("channel")
+    s.add_argument("--type", dest="event_type", choices=EVENT_TYPES)
+    s.set_defaults(func=cmd_event_read)
+
     s = sub.add_parser("read", help="print new messages for an agent (advances cursor)")
     s.add_argument("channel")
     s.add_argument("--as", dest="agent", required=True)
@@ -1085,7 +1306,7 @@ def main(argv=None):
         root = root_dir(args.root)
         args.func(root, args)
     except AgentChatError as e:
-        die(str(e))
+        die(str(e), code=2 if isinstance(e, AdapterEventError) else 1)
     except KeyboardInterrupt:
         print(file=sys.stderr)  # print a newline to cleanly break from input prompts
         die("cancelled by user", code=130)

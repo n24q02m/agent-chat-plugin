@@ -43,6 +43,16 @@ Run via `python <skill>/chat.py <cmd>`. Root = `$AGENT_CHAT_ROOT` or `~/agent-ch
 | Recover pending path transaction | `chat.py recover-pending review --as alice` |
 | Render channel state | `chat.py state review` |
 | Compact channel state | `chat.py compact review --as alice` |
+| Post capability/status event | `chat.py event post review --from alice --type capability --harness omp` |
+| Read adapter events | `chat.py event read review --type capability` |
+
+Adapter-neutral events use schema version `1` and are carried as JSON bodies in
+ordinary channel messages. Capability events advertise only the portable
+primitives `messages`, `cursors`, `wait`, `tasks`, `dependencies`, `leases`,
+`path_locks`, and `state_summary`. Status events use `ready`, `busy`, `idle`,
+`blocked`, or `stopped`, with optional detail. Unknown fields, primitives,
+versions, timestamps, identities, and statuses fail with stable `EVENT_*`
+errors. This protocol does not claim MCP, ACP, wake bridge, or agent execution.
 Structured tasks use the same channel root and write authoritative JSON records
 under `<root>/<channel>/tasks/`; active lease records live under
 `<root>/<channel>/claims/<task-id>.<owner>.json`. Every successful task or lease
@@ -186,6 +196,18 @@ State errors exit nonzero with stable codes such as `STATE_INVALID_CHANNEL`,
 `STATE_CHANNEL_NOT_FOUND`, `STATE_INVALID_RECORD`, `STATE_MALFORMED_SOURCE`,
 `STATE_RECORD_NOT_FOUND`, `STATE_IO_ERROR`, and `STATE_AUDIT_FAILED`.
 `--reply <seq>` threads a message to an earlier one. `python chat.py <cmd> --help` for all flags.
+
+Adapter-neutral event commands:
+
+```text
+chat.py event post <channel> --from <agent> --type capability --harness <harness>
+chat.py event post <channel> --from <agent> --type status --harness <harness> --status ready
+chat.py event read <channel> [--type capability|status]
+```
+
+The event body is versioned JSON validated against
+`schemas/agent-chat-event.schema.json`. Ordinary Markdown messages remain
+unchanged and are ignored by `event read`.
 
 ## Folder layout
 
