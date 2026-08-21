@@ -707,7 +707,10 @@ def cmd_task_recover(root: Path, a):
 def cmd_task_recover_pending(root: Path, a):
     store = _lease_store(root, a.channel)
     with contextlib.redirect_stdout(io.StringIO()):
-        store.recover_pending(actor=_task_actor(a))
+        store.recover_pending(
+            actor=_task_actor(a),
+            publication_resolution=a.publication_resolution,
+        )
     print(f"recovered pending lease transaction in {a.channel}")
 
 
@@ -877,6 +880,11 @@ def build_parser() -> argparse.ArgumentParser:
     )
     s.add_argument("channel")
     s.add_argument("--as", "--from", dest="actor", required=True)
+    s.add_argument(
+        "--resolve-publication",
+        dest="publication_resolution",
+        choices=("rollback", "published"),
+    )
     s.set_defaults(func=cmd_task_recover_pending)
 
     for command, handler, help_text, action in (

@@ -1021,6 +1021,123 @@ class LeaseStoreTests(unittest.TestCase):
         self.assertEqual(len(list((self.channel / "claims").glob("T-0001.*.json"))), 1)
         self.assertFalse(self.leases.transaction_path.exists())
 
+    def _write_v1_phase_marker(self, phase: str):
+        self.create_task()
+        task_before = self.task_data()
+        task_after = self.task_data(
+            status="in_progress",
+            owner="alice",
+            lease_expires_at=ORPHAN_EXPIRY,
+        )
+        claim = LeaseRecord(
+            task_id="T-0001",
+            channel="review",
+            owner="alice",
+            lease_expires_at=ORPHAN_EXPIRY,
+            claimed_at=TIMESTAMP,
+            updated_at=TIMESTAMP,
+        )
+        task_path = self.channel / "tasks" / "T-0001.json"
+        task_path.write_text(json.dumps(task_after, indent=2) + "\n", encoding="utf-8")
+        self.leases.claims_dir.mkdir()
+        (self.leases.claims_dir / "T-0001.alice.json").write_text(
+            json.dumps(claim.to_dict(), indent=2) + "\n", encoding="utf-8"
+        )
+        self.leases.transaction_path.write_text(
+            json.dumps(
+                {
+                    "version": 1,
+                    "phase": phase,
+                    "task_id": "T-0001",
+                    "task_file": "tasks/T-0001.json",
+                    "task_before": self.leases._encode_bytes(
+                        json.dumps(task_before, separators=(",", ":")).encode("utf-8")
+                    ),
+                    "task_after": self.leases._encode_bytes(
+                        json.dumps(task_after, separators=(",", ":")).encode("utf-8")
+                    ),
+                    "claim_changes": [
+                        {
+                            "file": "T-0001.alice.json",
+                            "previous": None,
+                            "next": self.leases._encode_bytes(
+                                self.leases._json_bytes(claim)
+                            ),
+                        }
+                    ],
+                    "event": "lease.claimed",
+                },
+                indent=2,
+            )
+            + "\n",
+            encoding="utf-8",
+        )
+
+    def test_legacy_v1_published_phase_only_cleans_marker(self):
+        self._write_v1_phase_marker("published")
+
+        LeaseStore(self.channel).recover_pending(actor="recovery")
+
+        self.assertEqual(self.tasks.show("T-0001").owner, "alice")
+        self.assertTrue((self.channel / "claims" / "T-0001.alice.json").exists())
+        self.assertFalse(self.leases.transaction_path.exists())
+
+    def test_legacy_v1_prepared_phase_rolls_back(self):
+        self._write_v1_phase_marker("prepared")
+
+        LeaseStore(self.channel).recover_pending(actor="recovery")
+
+        self.assertEqual((self.tasks.show("T-0001").status, self.tasks.show("T-0001").owner), ("open", None))
+        self.assertEqual(list((self.channel / "claims").glob("*.json")), [])
+        self.assertFalse(self.leases.transaction_path.exists())
+
+    def test_legacy_v1_applied_phase_requires_explicit_publication_resolution(self):
+        self._write_v1_phase_marker("applied")
+        before_task = (self.channel / "tasks" / "T-0001.json").read_bytes()
+        before_claim = (self.channel / "claims" / "T-0001.alice.json").read_bytes()
+
+        with self.assertRaises(LeaseError) as error:
+            LeaseStore(self.channel).recover_pending(actor="recovery")
+        self.assertEqual(error.exception.code, "LEASE_TRANSACTION_PUBLICATION_UNKNOWN")
+        self.assertTrue(self.leases.transaction_path.exists())
+        self.assertEqual((self.channel / "tasks" / "T-0001.json").read_bytes(), before_task)
+        self.assertEqual((self.channel / "claims" / "T-0001.alice.json").read_bytes(), before_claim)
+
+        LeaseStore(self.channel).recover_pending(
+            actor="recovery", publication_resolution="rollback"
+        )
+        self.assertEqual((self.tasks.show("T-0001").status, self.tasks.show("T-0001").owner), ("open", None))
+        self.assertFalse(self.leases.transaction_path.exists())
+
+    def test_v2_pending_marker_requires_explicit_phase(self):
+        self.create_task()
+        self.leases.claims_dir.mkdir()
+        task_bytes = (self.channel / "tasks" / "T-0001.json").read_bytes()
+        self.leases.transaction_path.write_text(
+            json.dumps(
+                {
+                    "version": 2,
+                    "transaction_id": "v2-missing-phase",
+                    "task_id": "T-0001",
+                    "task_file": "tasks/T-0001.json",
+                    "task_before": self.leases._encode_bytes(task_bytes),
+                    "task_after": self.leases._encode_bytes(task_bytes),
+                    "claim_changes": [],
+                    "event": "lease.claimed",
+                },
+                indent=2,
+            )
+            + "\n",
+            encoding="utf-8",
+        )
+        before = (self.channel / "tasks" / "T-0001.json").read_bytes()
+
+        with self.assertRaises(LeaseError) as error:
+            LeaseStore(self.channel).recover_pending(actor="recovery")
+        self.assertEqual(error.exception.code, "LEASE_TRANSACTION_INVALID")
+        self.assertEqual((self.channel / "tasks" / "T-0001.json").read_bytes(), before)
+        self.assertTrue(self.leases.transaction_path.exists())
+
     def test_same_owner_published_recovery_collapses_duplicate_path_deltas(self):
         self.create_task()
         self.leases.claim("T-0001", "alice", lease_seconds=30)

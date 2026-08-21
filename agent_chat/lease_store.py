@@ -621,6 +621,16 @@ class LeaseStore:
                 "transaction journal is missing transaction_id",
                 path=str(path),
             )
+        if raw.get("version") == 2 and raw.get("phase") not in {
+            "prepared",
+            "applied",
+            "published",
+        }:
+            raise LeaseError(
+                "LEASE_TRANSACTION_INVALID",
+                "version 2 transaction journal requires an explicit valid phase",
+                path=str(path),
+            )
         for field in ("task_file", "task_before", "claim_changes", "event"):
             if field not in raw:
                 raise LeaseError(
@@ -835,9 +845,19 @@ class LeaseStore:
         return False
 
 
-    def recover_pending(self, *, actor: str = "recovery") -> None:
-        """Rollback a crashed lease transaction after an explicit request."""
+    def recover_pending(
+        self,
+        *,
+        actor: str = "recovery",
+        publication_resolution: str | None = None,
+    ) -> None:
+        """Rollback or finalize a pending lease transaction explicitly."""
 
+        if publication_resolution not in {None, "rollback", "published"}:
+            raise LeaseError(
+                "LEASE_TRANSACTION_INVALID",
+                "publication_resolution must be rollback or published",
+            )
         _validate_identity(actor, "actor", "LEASE_INVALID_OWNER")
         with self.tasks._mutation_lock():
             pending = self._read_transaction()
@@ -1088,7 +1108,30 @@ class LeaseStore:
                         "LEASE_TRANSACTION_INVALID",
                         f"unsupported transaction phase: {phase!r}",
                     )
-                if phase == "applied" and self._audit_event_exists_for_transaction(
+                if publication_resolution is not None:
+                    if phase != "applied":
+                        raise LeaseError(
+                            "LEASE_TRANSACTION_INVALID",
+                            "publication resolution applies only to applied transactions",
+                        )
+                    phase = (
+                        "published"
+                        if publication_resolution == "published"
+                        else "prepared"
+                    )
+                elif (
+                    phase == "applied"
+                    and pending.get("version") == 1
+                    and not pending.get("transaction_id")
+                ):
+                    raise LeaseError(
+                        "LEASE_TRANSACTION_PUBLICATION_UNKNOWN",
+                        "legacy applied transaction publication state is unknown; rerun with explicit publication resolution",
+                        task_id=pending.get("task_id"),
+                        event=pending.get("event"),
+                        path=str(self.transaction_path),
+                    )
+                elif phase == "applied" and self._audit_event_exists_for_transaction(
                     pending.get("transaction_id")
                 ):
                     phase = "published"
@@ -1773,8 +1816,12 @@ def recover_pending(
     *,
     root: Path | str | None = None,
     actor: str = "recovery",
+    publication_resolution: str | None = None,
 ) -> None:
-    LeaseStore(channel, root=root).recover_pending(actor=actor)
+    LeaseStore(channel, root=root).recover_pending(
+        actor=actor,
+        publication_resolution=publication_resolution,
+    )
 
 
 def recover_task(
