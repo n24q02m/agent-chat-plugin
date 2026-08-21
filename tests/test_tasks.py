@@ -660,6 +660,15 @@ class TaskCommandTests(unittest.TestCase):
                 )
                 self.assertEqual((code, error), (0, ""))
 
+    def test_task_io_errors_use_stable_errors(self):
+        with patch(
+            "agent_chat.task_store.os.mkdir",
+            side_effect=OSError("permission denied"),
+        ):
+            code, _, error = self.run_cli("task", "list", "review")
+        self.assertEqual(code, 2)
+        self.assertIn("TASK_IO_ERROR", error)
+
     def test_malformed_task_inputs_use_stable_errors(self):
         code, _, error = self.run_cli(
             "task",

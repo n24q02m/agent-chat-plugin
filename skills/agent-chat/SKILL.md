@@ -74,8 +74,8 @@ Task failures are nonzero (exit status 2) and include one stable code:
 `TASK_INVALID_UPDATE`, `TASK_INVALID_TRANSITION`,
 `TASK_DEPENDENCY_NOT_READY`, `TASK_UNKNOWN_DEPENDENCY`,
 `TASK_DEPENDENCY_CYCLE`, `TASK_PATH_OUTSIDE_WORKSPACE`,
-`TASK_LOCK_TIMEOUT`, or `TASK_AUDIT_FAILED`. Task writes are lock-protected,
-atomic, and rolled back if the audit event cannot be written.
+`TASK_LOCK_TIMEOUT`, `TASK_IO_ERROR`, or `TASK_AUDIT_FAILED`. Task writes are
+lock-protected, atomic, and rolled back if the audit event cannot be written.
 
 `--reply <seq>` threads a message to an earlier one. `python chat.py <cmd> --help` for all flags.
 
