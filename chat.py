@@ -543,6 +543,52 @@ def _path_lock_store(root: Path, channel: str):
         ) from error
     return PathLockStore(chan, root=root)
 
+def _state_store(root: Path, channel: str):
+    from agent_chat.state_store import StateStore, StateValidationError
+
+    try:
+        chan = channel_dir(root, channel)
+    except AgentChatError as error:
+        raise StateValidationError(
+            "STATE_INVALID_CHANNEL",
+            f"invalid channel name: '{channel}' ({error})",
+        ) from error
+    return StateStore(chan, root=root)
+
+
+def cmd_state(root: Path, a):
+    store = _state_store(root, a.channel)
+    if getattr(a, "write", False):
+        summary = store.compact(
+            actor=getattr(a, "actor", None),
+            audit=not getattr(a, "no_audit", False),
+            strict=getattr(a, "strict", False),
+        )
+        if getattr(a, "json", False):
+            print(json.dumps(summary.to_dict(), indent=2, sort_keys=True))
+        else:
+            print(f"compacted state for {a.channel} -> {a.channel}/state.md")
+    else:
+        if getattr(a, "json", False):
+            summary = store.summarize(strict=getattr(a, "strict", False))
+            print(json.dumps(summary.to_dict(), indent=2, sort_keys=True))
+        else:
+            md = store.render(strict=getattr(a, "strict", False))
+            print(md, end="")
+
+
+def cmd_compact(root: Path, a):
+    store = _state_store(root, a.channel)
+    summary = store.compact(
+        actor=getattr(a, "actor", None),
+        audit=not getattr(a, "no_audit", False),
+        strict=getattr(a, "strict", False),
+    )
+    if getattr(a, "json", False):
+        print(json.dumps(summary.to_dict(), indent=2, sort_keys=True))
+    else:
+        print(f"compacted state for {a.channel} -> {a.channel}/state.md (open_tasks={len(summary.open_tasks)}, locks={len(summary.path_locks)}, decisions={len(summary.decisions)})")
+
 
 def cmd_lock(root: Path, a):
     store = _path_lock_store(root, a.channel)
@@ -910,6 +956,23 @@ def build_parser() -> argparse.ArgumentParser:
         choices=("rollback", "published"),
     )
     s.set_defaults(func=cmd_path_recover_pending)
+
+    s = sub.add_parser("state", help="render or show channel state summary")
+    s.add_argument("channel")
+    s.add_argument("--as", "--from", "--actor", dest="actor", help="agent identity")
+    s.add_argument("--write", "--save", action="store_true", help="write state.md to channel")
+    s.add_argument("--no-audit", action="store_true", help="skip posting audit message on write")
+    s.add_argument("--json", action="store_true", help="output structured JSON summary")
+    s.add_argument("--strict", action="store_true", help="strictly validate all source files")
+    s.set_defaults(func=cmd_state)
+
+    s = sub.add_parser("compact", help="compact channel state into state.md")
+    s.add_argument("channel")
+    s.add_argument("--as", "--from", "--actor", dest="actor", help="agent identity")
+    s.add_argument("--no-audit", action="store_true", help="do not post audit event to channel")
+    s.add_argument("--json", action="store_true", help="output structured JSON summary")
+    s.add_argument("--strict", action="store_true", help="strictly validate all source files")
+    s.set_defaults(func=cmd_compact)
 
     task = sub.add_parser(
         "task",

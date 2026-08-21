@@ -41,6 +41,8 @@ Run via `python <skill>/chat.py <cmd>`. Root = `$AGENT_CHAT_ROOT` or `~/agent-ch
 | Release path lock | `chat.py unlock review <lock-id-or-path> --as alice` |
 | Recover stale lock | `chat.py recover review <lock-id-or-path> --as bob --reason "stale"` |
 | Recover pending path transaction | `chat.py recover-pending review --as alice` |
+| Render channel state | `chat.py state review` |
+| Compact channel state | `chat.py compact review --as alice` |
 Structured tasks use the same channel root and write authoritative JSON records
 under `<root>/<channel>/tasks/`; active lease records live under
 `<root>/<channel>/claims/<task-id>.<owner>.json`. Every successful task or lease
@@ -154,6 +156,35 @@ journaling. Path-lock errors exit nonzero with stable codes such as
 `PATH_LOCK_TRANSACTION_PENDING`, `PATH_LOCK_TRANSACTION_CLEANUP_FAILED`,
 `PATH_LOCK_TRANSACTION_INVALID`, `PATH_LOCK_AUDIT_FAILED`, and
 `PATH_LOCK_AUDIT_ROLLBACK_FAILED`.
+
+
+Channel state summary and compaction derive a deterministic `state.md` artifact:
+
+```text
+chat.py state <channel> [--write] [--json] [--strict]
+chat.py compact <channel> [--as <agent>] [--no-audit] [--json] [--strict]
+```
+
+`state` renders or prints the derived channel summary containing:
+- Goal / Topic (from `_meta.json`)
+- Decisions (extracted from messages and structured records)
+- Open Tasks (from `tasks/*.json`, including status, owner, lease, dependencies)
+- Blockers (task dependency blockers, blocked task statuses, and blocker messages)
+- Owners & Leases (active claims, task ownerships, and path locks)
+- Path Locks (active path locks from `locks/*.json`)
+- Last Verification Evidence (acceptance criteria and verification messages)
+
+`compact` writes the derived summary to `<root>/<channel>/state.md` using atomic
+temporary sibling replacement (`.state.md.tmp.*`) and by default posts an auditable
+`state.compacted` message event to the channel.
+
+`state.md` is strictly a derived artifact and is **never authoritative**.
+Compaction is non-destructive: it never deletes, mutates, or truncates any message file,
+task record, active claim, path lock, or read cursor. All source records remain the
+immutable ground truth.
+State errors exit nonzero with stable codes such as `STATE_INVALID_CHANNEL`,
+`STATE_CHANNEL_NOT_FOUND`, `STATE_INVALID_RECORD`, `STATE_MALFORMED_SOURCE`,
+`STATE_RECORD_NOT_FOUND`, `STATE_IO_ERROR`, and `STATE_AUDIT_FAILED`.
 `--reply <seq>` threads a message to an earlier one. `python chat.py <cmd> --help` for all flags.
 
 ## Folder layout
@@ -161,10 +192,14 @@ journaling. Path-lock errors exit nonzero with stable codes such as
 ```
 <root>/
   review/                     # one channel = one group chat
-    _meta.json                   # members, topic, created
+    _meta.json                # members, topic, created
+    state.md                  # derived state summary (non-authoritative)
     0001-alice-schema-draft.md # NNNN-<from>-<slug>.md, frontmatter + body
     0002-bob-schema-review.md
-    .cursors/bob.txt           # per-agent "last seq read"
+    tasks/                    # structured task records
+    claims/                   # active lease records
+    locks/                    # active workspace path locks
+    .cursors/bob.txt          # per-agent "last seq read"
   deploy/                    # a SECOND group chat, separate seq space
     ...
 ```
