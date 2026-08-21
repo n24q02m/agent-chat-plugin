@@ -18,6 +18,7 @@ from agent_chat.task_store import TaskStore
 
 TIMESTAMP = "2026-08-21T12:00:00+00:00"
 EXPIRED = "2020-01-01T00:00:00+00:00"
+ORPHAN_EXPIRY = "2099-01-01T00:00:00+00:00"
 
 
 class LeaseStoreTests(unittest.TestCase):
@@ -169,6 +170,14 @@ class LeaseStoreTests(unittest.TestCase):
         messages = [path.read_text(encoding="utf-8") for path in self.channel.glob("[0-9][0-9][0-9][0-9]-*.md")]
         self.assertTrue(any("lease.recovered" in body and "alice abandoned the task" in body for body in messages))
 
+    def test_release_rejects_orphaned_task_lease_record(self):
+        self.create_task(owner="alice", lease_expires_at=ORPHAN_EXPIRY)
+
+        with self.assertRaises(LeaseError) as error:
+            self.leases.release("T-0001", "alice")
+
+        self.assertEqual(error.exception.code, "LEASE_INCONSISTENT")
+
     def test_preassigned_owner_can_establish_its_first_lease(self):
         self.create_task(owner="alice")
 
@@ -253,6 +262,18 @@ class LeaseStoreTests(unittest.TestCase):
         code, output, error = run_cli("task", "release", "review", "T-0001", "--as", "alice")
         self.assertEqual((code, error), (0, ""))
         self.assertEqual(output, "released task T-0001 [open]\n")
+        self.assertEqual(
+            run_cli(
+                "task", "create", "review", "T-0002", "--from", "alice", "--title", "Complete me"
+            )[0],
+            0,
+        )
+        self.leases.claim("T-0002", "alice", lease_seconds=30)
+        code, output, error = run_cli("task", "done", "review", "T-0002", "--as", "alice")
+        self.assertEqual((code, error), (0, ""))
+        self.assertEqual(output, "done task T-0002 [done]\n")
+        self.assertEqual(list((self.channel / "claims").glob("*.json")), [])
+
 
         self.leases.claim("T-0001", "alice", lease_seconds=30)
         self.expire_claim()
@@ -262,6 +283,50 @@ class LeaseStoreTests(unittest.TestCase):
         self.assertEqual((code, error), (0, ""))
         self.assertEqual(output, "recovered task T-0001 [in_progress]\n")
 
+
+    def test_owner_can_complete_and_cleanup_active_lease(self):
+        self.create_task()
+        self.leases.claim("T-0001", "alice", lease_seconds=30)
+
+        completed = self.leases.complete("T-0001", "alice")
+
+        self.assertEqual(completed.status, "done")
+        self.assertIsNone(completed.owner)
+        self.assertIsNone(completed.lease_expires_at)
+        self.assertEqual(list((self.channel / "claims").glob("*.json")), [])
+        with self.assertRaises(LeaseError) as error:
+            self.leases.renew("T-0001", "alice", lease_seconds=30)
+        self.assertEqual(error.exception.code, "LEASE_NOT_FOUND")
+
+    def test_task_done_cli_clears_active_lease(self):
+        def run_cli(*argv):
+            stdout = io.StringIO()
+            stderr = io.StringIO()
+            with contextlib.redirect_stdout(stdout), contextlib.redirect_stderr(stderr):
+                try:
+                    chat.main(["--root", str(self.root), *argv])
+                except SystemExit as error:
+                    return error.code, stdout.getvalue(), stderr.getvalue()
+            return 0, stdout.getvalue(), stderr.getvalue()
+
+        self.assertEqual(
+            run_cli(
+                "task", "create", "review", "T-0001", "--from", "alice", "--title", "Complete me"
+            )[0],
+            0,
+        )
+        self.assertEqual(
+            run_cli(
+                "task", "claim", "review", "T-0001", "--as", "alice", "--lease-seconds", "30"
+            )[0],
+            0,
+        )
+        code, output, error = run_cli(
+            "task", "done", "review", "T-0001", "--as", "alice"
+        )
+        self.assertEqual((code, error), (0, ""))
+        self.assertEqual(output, "done task T-0001 [done]\n")
+        self.assertEqual(list((self.channel / "claims").glob("*.json")), [])
 
 if __name__ == "__main__":
     unittest.main()

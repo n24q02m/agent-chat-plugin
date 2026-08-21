@@ -634,6 +634,7 @@ class LeaseStore:
             task_path, current, records = self._read_task_locked(task_id)
             claim = self._current_claim(task_id)
             if claim is None:
+                self._assert_consistent(current, None)
                 raise LeaseError("LEASE_NOT_FOUND", f"no active lease for task {task_id}")
             path, existing = claim
             self._assert_consistent(current, claim)
@@ -702,6 +703,7 @@ class LeaseStore:
             task_path, current, records = self._read_task_locked(task_id)
             claim = self._current_claim(task_id)
             if claim is None:
+                self._assert_consistent(current, None)
                 raise LeaseError("LEASE_NOT_FOUND", f"no active lease for task {task_id}")
             path, existing = claim
             self._assert_consistent(current, claim)
@@ -744,6 +746,67 @@ class LeaseStore:
                     "previous_lease_expires_at": existing.lease_expires_at,
                 },
             )
+
+    def complete(
+        self,
+        task_id: str,
+        owner: str,
+        *,
+        actor: str | None = None,
+        now: Any = None,
+    ) -> TaskRecord:
+        """Complete an owned lease and clear its active claim atomically."""
+
+        _validate_identity(owner, "owner", "LEASE_INVALID_OWNER")
+        with self.tasks._mutation_lock():
+            task_path, current, records = self._read_task_locked(task_id)
+            claim = self._current_claim(task_id)
+            if claim is None:
+                self._assert_consistent(current, None)
+                raise LeaseError("LEASE_NOT_FOUND", f"no active lease for task {task_id}")
+            path, existing = claim
+            self._assert_consistent(current, claim)
+            if existing.owner != owner:
+                raise LeaseError(
+                    "LEASE_OWNER_MISMATCH",
+                    f"lease for task {task_id} belongs to {existing.owner}",
+                    task_id=task_id,
+                    owner=owner,
+                    current_owner=existing.owner,
+                )
+            current_now = self._now(now)
+            if _is_expired(existing.lease_expires_at, current_now):
+                raise LeaseError(
+                    "LEASE_RECOVERY_REQUIRED",
+                    f"expired lease for task {task_id} requires explicit recovery",
+                    task_id=task_id,
+                    previous_owner=existing.owner,
+                    previous_lease_expires_at=existing.lease_expires_at,
+                )
+            updated_at = _timestamp(current_now, field="updated_at")
+            candidate = self._candidate(
+                current,
+                records,
+                owner=None,
+                status="done",
+                lease_expires_at=None,
+                updated_at=updated_at,
+            )
+            previous = path.read_bytes()
+            return self._run_transaction(
+                task_path=task_path,
+                current=current,
+                candidate=candidate,
+                claim_changes=[(path, previous, None)],
+                event="lease.completed",
+                actor=actor or owner,
+                details={
+                    "lease_owner": owner,
+                    "previous_lease_expires_at": existing.lease_expires_at,
+                },
+            )
+
+
 
     def recover(
         self,
@@ -865,6 +928,20 @@ def release_task(
     return LeaseStore(channel, root=root).release(task_id, owner, actor=actor, now=now)
 
 
+def complete_task(
+    channel: Path | str,
+    task_id: str,
+    owner: str,
+    *,
+    root: Path | str | None = None,
+    actor: str | None = None,
+    now: Any = None,
+) -> TaskRecord:
+    return LeaseStore(channel, root=root).complete(
+        task_id, owner, actor=actor, now=now
+    )
+
+
 def recover_task(
     channel: Path | str,
     task_id: str,
@@ -896,7 +973,7 @@ __all__ = [
     "LeaseRecord",
     "LeaseStore",
     "claim_task",
-    "recover_task",
+    "complete_task",
     "release_task",
     "renew_task",
 ]
