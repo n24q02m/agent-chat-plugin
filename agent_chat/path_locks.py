@@ -1374,14 +1374,19 @@ class PathLockStore:
                     transaction_id=transaction["transaction_id"],
                     operation=operation,
                 ) from error
-            if applied:
+            try:
+                current_on_disk = path.read_bytes() if path.exists() else None
+            except Exception:
+                current_on_disk = None
+            has_mutated = applied or (current_on_disk != before)
+            if has_mutated:
                 try:
                     self._restore_bytes(path, before)
                     self._remove_transaction()
                 except Exception as rollback_error:
                     raise PathLockError(
                         "PATH_LOCK_AUDIT_ROLLBACK_FAILED",
-                        f"path lock audit failed and rollback failed: {rollback_error}",
+                        f"path lock mutation failed and rollback failed: {rollback_error}",
                         transaction_pending=True,
                         transaction_id=transaction["transaction_id"],
                         original_error=str(error),

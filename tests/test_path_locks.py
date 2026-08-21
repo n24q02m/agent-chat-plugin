@@ -404,6 +404,42 @@ class PathLockStoreTests(unittest.TestCase):
         with self.assertRaises(PathLockError) as error:
             self.store.load(record.lock_id)
         self.assertEqual(error.exception.code, "PATH_LOCK_INVALID_RECORD")
+    def test_apply_failure_after_target_publish_rolls_back_cleanly(self):
+        original_link = path_locks.os.link
+
+        def link_and_raise(src, dst):
+            original_link(src, dst)
+            raise PathLockError("PATH_LOCK_STORAGE_ERROR", "injected failure after link")
+
+        with mock.patch.object(path_locks.os, "link", side_effect=link_and_raise):
+            with self.assertRaises(PathLockError) as error:
+                self.store.lock("alice", ["src/new4.py"], lease_seconds=60)
+        self.assertEqual(error.exception.code, "PATH_LOCK_STORAGE_ERROR")
+        self.assertEqual(self.store.list(), [])
+        self.assertFalse(self.store.transaction_path.exists())
+
+    def test_apply_failure_after_target_publish_with_rollback_failure_preserves_journal(self):
+        original_link = path_locks.os.link
+
+        def link_and_raise(src, dst):
+            original_link(src, dst)
+            raise PathLockError("PATH_LOCK_STORAGE_ERROR", "injected failure after link")
+
+        with mock.patch.object(
+            path_locks.os, "link", side_effect=link_and_raise
+        ), mock.patch.object(
+            self.store,
+            "_restore_bytes",
+            side_effect=OSError("rollback failed"),
+        ):
+            with self.assertRaises(PathLockError) as error:
+                self.store.lock("alice", ["src/new5.py"], lease_seconds=60)
+        self.assertEqual(error.exception.code, "PATH_LOCK_AUDIT_ROLLBACK_FAILED")
+        self.assertTrue(self.store.transaction_path.exists())
+        recovered = PathLockStore(self.channel, root=self.root)
+        recovered.recover_pending(actor="recovery")
+        self.assertFalse(recovered.transaction_path.exists())
+        self.assertEqual(recovered.list(), [])
 
 if __name__ == "__main__":
     unittest.main()
