@@ -638,6 +638,62 @@ class StateStoreTests(unittest.TestCase):
         summary = self.state_store.summarize(strict=False)
         self.assertIsInstance(summary, StateSummary)
 
+    def test_strict_state_rejects_task_files_hint_symlink_escape(self):
+        """Strict state loading must enforce task workspace path boundaries."""
+        tasks_dir = self.channel / "tasks"
+        tasks_dir.mkdir(exist_ok=True)
+        outside = self.root / "outside-task-target.txt"
+        outside.write_text("outside", encoding="utf-8")
+        link = self.channel / "linked-task-target.txt"
+        try:
+            link.symlink_to(outside)
+        except OSError as error:
+            self.skipTest(f"symlink creation unavailable: {error}")
+
+        task = {
+            "id": "T-escape",
+            "channel": "review",
+            "title": "Escaping task",
+            "status": "open",
+            "owner": None,
+            "created_by": "alice",
+            "depends_on": [],
+            "files_hint": [link.name],
+            "acceptance": [],
+            "lease_expires_at": None,
+            "branch": None,
+            "updated_at": TIMESTAMP_FIXED,
+        }
+        (tasks_dir / "T-escape.json").write_text(
+            json.dumps(task), encoding="utf-8"
+        )
+
+        with self.assertRaises(StateValidationError) as raised:
+            self.state_store.summarize(strict=True)
+        self.assertEqual(raised.exception.code, "STATE_MALFORMED_SOURCE")
+
+    def test_strict_state_rejects_path_lock_symlink_escape(self):
+        """Strict state loading must use PathLockStore boundary validation."""
+        self.lock_store.lock(
+            owner="alice",
+            paths=["state-target.txt"],
+            lease_seconds=300.0,
+            now=TIMESTAMP_FIXED,
+        )
+        lock_path = next((self.channel / "locks").glob("*.json"))
+        outside = self.root / "outside-lock.json"
+        outside.write_bytes(lock_path.read_bytes())
+        lock_name = lock_path.name
+        lock_path.unlink()
+        try:
+            lock_path.symlink_to(outside)
+        except OSError as error:
+            self.skipTest(f"symlink creation unavailable: {error}")
+
+        with self.assertRaises(StateValidationError) as raised:
+            self.state_store.summarize(strict=True)
+        self.assertEqual(raised.exception.code, "STATE_MALFORMED_SOURCE")
+
     def test_error_hierarchy_and_properties(self):
         """StateError inherits from AgentChatError and has stable code and message properties."""
         err = StateValidationError("STATE_TEST_CODE", "Test error message", detail_key="detail_val")

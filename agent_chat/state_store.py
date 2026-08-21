@@ -470,26 +470,37 @@ class StateStore:
                     )
                 )
 
-        # 3. Tasks: open tasks, task blockers, completed verifications, owner assignments
-        task_store = TaskStore(self.channel)
+        # 3. Tasks: load through the authoritative store so workspace and graph
+        # validation match the task protocol rather than a second parser.
+        task_store = TaskStore(self.channel, root=self.root)
         all_tasks: list[TaskRecord] = []
         open_tasks: list[TaskRecord] = []
         task_blockers: list[BlockerRecord] = []
 
-        tasks_dir = self.channel / "tasks"
-        if tasks_dir.exists() and tasks_dir.is_dir():
-            for p in tasks_dir.glob("*.json"):
-                try:
-                    raw_task = json.loads(p.read_text(encoding="utf-8"))
-                    task_record = TaskRecord.from_dict(raw_task)
-                    all_tasks.append(task_record)
-                except Exception as error:
-                    if strict:
-                        raise StateValidationError(
-                            "STATE_MALFORMED_SOURCE",
-                            f"malformed task file {p.name}: {error}",
-                            path=str(p),
-                        ) from error
+        try:
+            all_tasks = task_store.list()
+        except Exception as error:
+            if strict:
+                raise StateValidationError(
+                    "STATE_MALFORMED_SOURCE",
+                    f"malformed task source: {error}",
+                    channel=self.channel_name,
+                ) from error
+
+            # Lenient mode keeps valid records available while ignoring only
+            # records that cannot satisfy the authoritative task contract.
+            tasks_dir = self.channel / "tasks"
+            if tasks_dir.exists() and tasks_dir.is_dir():
+                for path in sorted(tasks_dir.glob("*.json"), key=lambda item: item.name):
+                    try:
+                        resolved = path.resolve(strict=False)
+                        resolved.relative_to(tasks_dir.resolve(strict=False))
+                        raw_task = json.loads(path.read_text(encoding="utf-8"))
+                        all_tasks.append(
+                            TaskRecord.from_dict(raw_task, workspace=self.channel)
+                        )
+                    except Exception:
+                        continue
 
         # Map completed task IDs
         done_task_ids = {t.id for t in all_tasks if t.status == "done"}
@@ -541,26 +552,20 @@ class StateStore:
                     )
                 )
 
-        # 4. Path Locks
-        lock_store = PathLockStore(self.channel)
-        active_locks: list[PathLockRecord] = []
-        locks_dir = self.channel / "locks"
-        if locks_dir.exists() and locks_dir.is_dir():
-            for p in locks_dir.glob("*.json"):
-                if p.name.startswith("."):
-                    continue
-                try:
-                    raw_lock = json.loads(p.read_text(encoding="utf-8"))
-                    lock_record = PathLockRecord.from_dict(raw_lock)
-                    active_locks.append(lock_record)
-                except Exception as error:
-                    if strict:
-                        raise StateValidationError(
-                            "STATE_MALFORMED_SOURCE",
-                            f"malformed path lock file {p.name}: {error}",
-                            path=str(p),
-                        ) from error
-
+        # 4. Path locks: use the validated store so storage containment,
+        # symlink, record-shape, and platform normalization rules stay single
+        # sourced in path_locks.py.
+        lock_store = PathLockStore(self.channel, root=self.root)
+        try:
+            active_locks = lock_store.list()
+        except Exception as error:
+            if strict:
+                raise StateValidationError(
+                    "STATE_MALFORMED_SOURCE",
+                    f"malformed path lock source: {error}",
+                    channel=self.channel_name,
+                ) from error
+            active_locks = []
         # 5. Owners aggregation
         owners_map: dict[str, dict[str, list[Any]]] = {}
 
