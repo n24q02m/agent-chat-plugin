@@ -440,6 +440,103 @@ class PathLockStoreTests(unittest.TestCase):
         recovered.recover_pending(actor="recovery")
         self.assertFalse(recovered.transaction_path.exists())
         self.assertEqual(recovered.list(), [])
+    def test_apply_failure_with_readback_failure_preserves_journal(self):
+        original_link = path_locks.os.link
+
+        def link_and_raise(src, dst):
+            original_link(src, dst)
+            raise PathLockError("PATH_LOCK_STORAGE_ERROR", "injected failure after link")
+
+        original_read_bytes = Path.read_bytes
+
+        def failing_read_bytes(path_obj):
+            if path_obj.parent.resolve() == self.store.locks_dir.resolve() and path_obj.suffix == ".json" and not path_obj.name.startswith("."):
+                raise OSError("unreadable target during rollback check")
+            return original_read_bytes(path_obj)
+
+        with mock.patch.object(
+            path_locks.os, "link", side_effect=link_and_raise
+        ), mock.patch.object(
+            Path, "read_bytes", side_effect=failing_read_bytes
+        ):
+            with self.assertRaises(PathLockError) as error:
+                self.store.lock("alice", ["src/new_unreadable.py"], lease_seconds=60)
+        self.assertEqual(error.exception.code, "PATH_LOCK_AUDIT_ROLLBACK_FAILED")
+        self.assertTrue(self.store.transaction_path.exists())
+        recovered = PathLockStore(self.channel, root=self.root)
+        recovered.recover_pending(actor="recovery")
+        self.assertFalse(recovered.transaction_path.exists())
+        self.assertEqual(recovered.list(), [])
+    def test_recovery_reason_rejects_control_and_surrogate_unicode(self):
+        record = self.store.lock("alice", ["src/main.py"], lease_seconds=1)
+        lock_path = self.channel / "locks" / f"{record.lock_id}.json"
+        raw = json.loads(lock_path.read_text(encoding="utf-8"))
+        raw["expires_at"] = "2000-01-01T00:00:00+00:00"
+        lock_path.write_text(json.dumps(raw, indent=2) + "\n", encoding="utf-8")
+
+        for bad_reason in ("", "   ", "bad" + chr(1), "bad" + chr(0xD800), "bad\nreason"):
+            with self.subTest(bad_reason=bad_reason):
+                with self.assertRaises(PathLockError) as error:
+                    self.store.recover(record.lock_id, "bob", bad_reason, lease_seconds=60)
+                self.assertEqual(error.exception.code, "PATH_LOCK_INVALID_REASON")
+
+    def test_recover_pending_rejects_unsupported_publication_resolution(self):
+        record = self.store.lock("alice", ["src/new6.py"], lease_seconds=60)
+        lock_path = self.channel / "locks" / f"{record.lock_id}.json"
+        raw_bytes = lock_path.read_bytes()
+        self.store._write_transaction(
+            {
+                "version": 1,
+                "transaction_id": "tx-bad-res",
+                "phase": "applied",
+                "operation": "lock",
+                "event": "path.locked",
+                "target": f"{record.lock_id}.json",
+                "before": None,
+                "after": self.store._encode_bytes(raw_bytes),
+                "actor": "alice",
+            }
+        )
+        with self.assertRaises(PathLockError) as error:
+            self.store.recover_pending(actor="recovery", publication_resolution="invalid_resolution")
+        self.assertEqual(error.exception.code, "PATH_LOCK_TRANSACTION_INVALID")
+        # Clean up
+        self.store.recover_pending(actor="recovery", publication_resolution="published")
+        self.assertFalse(self.store.transaction_path.exists())
+
+    def test_cli_recover_pending_command(self):
+        record = self.store.lock("alice", ["src/new7.py"], lease_seconds=60)
+        lock_path = self.channel / "locks" / f"{record.lock_id}.json"
+        raw_bytes = lock_path.read_bytes()
+        self.store._write_transaction(
+            {
+                "version": 1,
+                "transaction_id": "tx-cli-pending",
+                "phase": "applied",
+                "operation": "lock",
+                "event": "path.locked",
+                "target": f"{record.lock_id}.json",
+                "before": None,
+                "after": self.store._encode_bytes(raw_bytes),
+                "actor": "alice",
+            }
+        )
+        output = io.StringIO()
+        with contextlib.redirect_stdout(output):
+            chat.main(
+                [
+                    "--root",
+                    str(self.root),
+                    "recover-pending",
+                    "review",
+                    "--as",
+                    "recovery",
+                    "--resolve-publication",
+                    "published",
+                ]
+            )
+        self.assertIn("recovered pending path-lock transaction in review", output.getvalue())
+        self.assertFalse(self.store.transaction_path.exists())
 
 if __name__ == "__main__":
     unittest.main()

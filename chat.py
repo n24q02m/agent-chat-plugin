@@ -590,6 +590,14 @@ def cmd_path_recover(root: Path, a):
         f"previous_owner={record.previous_owner} reason={record.recovery_reason}"
     )
 
+def cmd_path_recover_pending(root: Path, a):
+    store = _path_lock_store(root, a.channel)
+    with contextlib.redirect_stdout(io.StringIO()):
+        store.recover_pending(
+            actor=a.actor,
+            publication_resolution=a.publication_resolution,
+        )
+    print(f"recovered pending path-lock transaction in {a.channel}")
 
 def _task_values(values) -> list[str]:
     items: list[str] = []
@@ -890,6 +898,18 @@ def build_parser() -> argparse.ArgumentParser:
     s.add_argument("--reason", required=True)
     s.add_argument("--lease-seconds", "--lease", "--ttl", type=float, default=300.0)
     s.set_defaults(func=cmd_path_recover)
+    s = sub.add_parser(
+        "recover-pending",
+        help="recover a pending crashed path-lock transaction",
+    )
+    s.add_argument("channel")
+    s.add_argument("--as", "--from", dest="actor", required=True)
+    s.add_argument(
+        "--resolve-publication",
+        dest="publication_resolution",
+        choices=("rollback", "published"),
+    )
+    s.set_defaults(func=cmd_path_recover_pending)
 
     task = sub.add_parser(
         "task",

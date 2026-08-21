@@ -298,7 +298,7 @@ def _validate_identity(value: Any, field: str, code: str) -> str:
 def _validate_reason(value: Any) -> str:
     if not isinstance(value, str) or not value.strip():
         raise PathLockError("PATH_LOCK_INVALID_REASON", "recovery reason must not be empty")
-    if "\x00" in value or "\r" in value or "\n" in value:
+    if any(_is_forbidden_text_character(char) for char in value):
         raise PathLockError(
             "PATH_LOCK_INVALID_REASON",
             "recovery reason contains a forbidden control character",
@@ -1374,10 +1374,28 @@ class PathLockStore:
                     transaction_id=transaction["transaction_id"],
                     operation=operation,
                 ) from error
+            read_failed = False
+            read_error = None
             try:
-                current_on_disk = path.read_bytes() if path.exists() else None
-            except Exception:
+                if path.exists():
+                    current_on_disk = path.read_bytes()
+                else:
+                    current_on_disk = None
+            except Exception as e:
+                read_failed = True
+                read_error = e
                 current_on_disk = None
+
+            if read_failed:
+                raise PathLockError(
+                    "PATH_LOCK_AUDIT_ROLLBACK_FAILED",
+                    f"path lock mutation failed and target state could not be verified: {read_error}",
+                    transaction_pending=True,
+                    transaction_id=transaction["transaction_id"],
+                    original_error=str(error),
+                    readback_error=str(read_error),
+                ) from read_error
+
             has_mutated = applied or (current_on_disk != before)
             if has_mutated:
                 try:
@@ -1416,6 +1434,11 @@ class PathLockStore:
         publication_resolution: str | None = None,
     ) -> None:
         _validate_identity(actor, "actor", "PATH_LOCK_INVALID_OWNER")
+        if publication_resolution not in {None, "rollback", "published"}:
+            raise PathLockError(
+                "PATH_LOCK_TRANSACTION_INVALID",
+                f"unsupported publication resolution: {publication_resolution!r}",
+            )
         with self._mutation():
             transaction = self._read_transaction()
             if transaction is None:

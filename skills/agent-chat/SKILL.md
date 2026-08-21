@@ -40,7 +40,7 @@ As a Claude Code plugin, run `python ${CLAUDE_PLUGIN_ROOT}/chat.py <cmd>` (stand
 | Check path conflicts | `chat.py check review src/main.py` |
 | Release path lock | `chat.py unlock review <lock-id-or-path> --as alice` |
 | Recover stale lock | `chat.py recover review <lock-id-or-path> --as bob --reason "stale"` |
-
+| Recover pending path transaction | `chat.py recover-pending review --as alice` |
 Structured tasks use the same channel root and write authoritative JSON records
 under `<root>/<channel>/tasks/`; active lease records live under
 `<root>/<channel>/claims/<task-id>.<owner>.json`. Every successful task or lease
@@ -129,6 +129,8 @@ chat.py check <channel> <paths...> [--as <agent>]
 chat.py unlock <channel> <lock-id-or-path> --as <agent>
 chat.py recover <channel> <lock-id-or-path> --as <agent> \
   --reason "stale session" [--lease-seconds 300]
+chat.py recover-pending <channel> --as <agent> \
+  [--resolve-publication rollback|published]
 ```
 
 `lock` and `recover` accept `--lease-seconds`, `--lease`, or `--ttl`. Target can

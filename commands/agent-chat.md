@@ -132,6 +132,8 @@ python ${CLAUDE_PLUGIN_ROOT}/chat.py unlock <channel> <lock-id-or-path> \
   --as $AGENT_CHAT_NAME
 python ${CLAUDE_PLUGIN_ROOT}/chat.py recover <channel> <lock-id-or-path> \
   --as $AGENT_CHAT_NAME --reason "stale session" [--lease-seconds 300]
+python ${CLAUDE_PLUGIN_ROOT}/chat.py recover-pending <channel> \
+  --as $AGENT_CHAT_NAME [--resolve-publication rollback|published]
 ```
 
 `lock` and `recover` accept `--lease-seconds`, `--lease`, or `--ttl`. Target can
