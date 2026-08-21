@@ -516,6 +516,19 @@ def _task_store(root: Path, channel: str):
         ) from error
     return TaskStore(chan, root=root)
 
+def _lease_store(root: Path, channel: str):
+    from agent_chat.lease_store import LeaseStore
+    from agent_chat.task_model import TaskValidationError
+
+    try:
+        chan = channel_dir(root, channel)
+    except AgentChatError as error:
+        raise TaskValidationError(
+            "TASK_INVALID_CHANNEL",
+            f"invalid channel name: '{channel}' ({error})",
+        ) from error
+    return LeaseStore(chan, root=root)
+
 
 
 
@@ -649,7 +662,54 @@ def cmd_task_block(root: Path, a):
 
 
 def cmd_task_release(root: Path, a):
-    _task_transition(root, a, "open", "released")
+    from agent_chat.lease_store import LeaseError
+
+    store = _lease_store(root, a.channel)
+    try:
+        with contextlib.redirect_stdout(io.StringIO()):
+            task = store.release(a.task_id, _task_actor(a))
+    except LeaseError as error:
+        # Preserve Task 3's unowned status-release behavior.  Real leases,
+        # including expired ones, must go through lease owner checks.
+        if error.code != "LEASE_NOT_FOUND":
+            raise
+        _task_transition(root, a, "open", "released")
+        return
+    _print_task_result("released", task)
+
+
+def cmd_task_claim(root: Path, a):
+    store = _lease_store(root, a.channel)
+    with contextlib.redirect_stdout(io.StringIO()):
+        task = store.claim(
+            a.task_id,
+            _task_actor(a),
+            lease_seconds=a.lease_seconds,
+        )
+    _print_task_result("claimed", task)
+
+
+def cmd_task_renew(root: Path, a):
+    store = _lease_store(root, a.channel)
+    with contextlib.redirect_stdout(io.StringIO()):
+        task = store.renew(
+            a.task_id,
+            _task_actor(a),
+            lease_seconds=a.lease_seconds,
+        )
+    _print_task_result("renewed", task)
+
+
+def cmd_task_recover(root: Path, a):
+    store = _lease_store(root, a.channel)
+    with contextlib.redirect_stdout(io.StringIO()):
+        task = store.recover(
+            a.task_id,
+            _task_actor(a),
+            reason=a.reason,
+            lease_seconds=a.lease_seconds,
+        )
+    _print_task_result("recovered", task)
 
 
 # --- argparse ----------------------------------------------------------------
@@ -789,6 +849,28 @@ def build_parser() -> argparse.ArgumentParser:
     s.add_argument("--status", default=argparse.SUPPRESS)
 
     s.set_defaults(func=cmd_task_update)
+
+    s = task_sub.add_parser("claim", help="claim a ready task with a lease")
+    s.add_argument("channel")
+    s.add_argument("task_id")
+    s.add_argument("--as", "--from", dest="actor", required=True)
+    s.add_argument("--lease-seconds", "--lease", "--ttl", type=float, default=300.0)
+    s.set_defaults(func=cmd_task_claim)
+
+    s = task_sub.add_parser("renew", help="renew an owned task lease")
+    s.add_argument("channel")
+    s.add_argument("task_id")
+    s.add_argument("--as", "--from", dest="actor", required=True)
+    s.add_argument("--lease-seconds", "--lease", "--ttl", type=float, default=300.0)
+    s.set_defaults(func=cmd_task_renew)
+
+    s = task_sub.add_parser("recover", help="recover an expired task lease")
+    s.add_argument("channel")
+    s.add_argument("task_id")
+    s.add_argument("--as", "--from", dest="actor", required=True)
+    s.add_argument("--reason", required=True)
+    s.add_argument("--lease-seconds", "--lease", "--ttl", type=float, default=300.0)
+    s.set_defaults(func=cmd_task_recover)
 
     for command, handler, help_text, action in (
         ("done", cmd_task_done, "mark a task done", "done"),

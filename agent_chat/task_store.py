@@ -349,6 +349,7 @@ class TaskStore:
         *,
         actor: str | None,
         previous: TaskRecord | None = None,
+        details: Mapping[str, Any] | None = None,
     ) -> None:
         payload: dict[str, Any] = {
             "event": event,
@@ -356,6 +357,7 @@ class TaskStore:
             "channel": task.channel,
             "status": task.status,
             "owner": task.owner,
+            "lease_expires_at": task.lease_expires_at,
             "updated_at": task.updated_at,
         }
         if previous is not None:
@@ -367,6 +369,8 @@ class TaskStore:
                 for field in TASK_FIELDS
                 if previous_data[field] != current_data[field]
             )
+        if details:
+            payload.update(details)
         body = json.dumps(payload, ensure_ascii=False, indent=2, sort_keys=True)
         sender = actor or task.created_by
         args = SimpleNamespace(
