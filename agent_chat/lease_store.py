@@ -570,7 +570,20 @@ class LeaseStore:
                     owner=existing.owner,
                     lease_expires_at=existing.lease_expires_at,
                 )
-            self._assert_consistent(current, None)
+            if current.lease_expires_at is not None:
+                raise LeaseError(
+                    "LEASE_INCONSISTENT",
+                    f"task {task_id} has a lease expiry without a claim record",
+                    task_id=task_id,
+                    lease_expires_at=current.lease_expires_at,
+                )
+            if current.owner is not None and current.owner != owner:
+                raise LeaseError(
+                    "LEASE_CONFLICT",
+                    f"task {task_id} is assigned to {current.owner}",
+                    task_id=task_id,
+                    owner=current.owner,
+                )
             current_now = self._now(now)
             _seconds, expires_at = self._expiry(current_now, lease_seconds)
             updated_at = _timestamp(current_now, field="updated_at")
