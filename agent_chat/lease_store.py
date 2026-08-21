@@ -306,7 +306,7 @@ class LeaseStore:
         return seconds, expiry.isoformat(timespec="microseconds")
 
     def _read_claim(self, path: Path) -> LeaseRecord:
-        self._assert_inside_channel(path)
+        self._assert_exact_claim_path(path, path.name)
         try:
             with path.open("r", encoding="utf-8") as stream:
                 raw = json.load(stream)
@@ -1059,6 +1059,11 @@ class LeaseStore:
                         previous_records.append(previous_record)
                     if next_record is not None:
                         next_records.append(next_record)
+                if len(previous_records) > 1:
+                    raise LeaseError(
+                        "LEASE_TRANSACTION_INVALID",
+                        "transaction has multiple distinct previous claims",
+                    )
                 if decoded_task.owner is not None and decoded_task.lease_expires_at is not None:
                     if not previous_records:
                         raise LeaseError(
