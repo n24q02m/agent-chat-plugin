@@ -1352,6 +1352,8 @@ class PathLockStore:
         self._write_transaction(transaction)
         publish_succeeded = False
         audit_published = False
+        before_apply = None
+        snapshot_error = None
         try:
             try:
                 if path.exists():
@@ -1359,6 +1361,7 @@ class PathLockStore:
                 else:
                     before_apply = None
             except Exception as read_error:
+                snapshot_error = read_error
                 raise PathLockError(
                     "PATH_LOCK_AUDIT_ROLLBACK_FAILED",
                     f"path lock mutation target could not be snapshotted: {read_error}",
@@ -1410,6 +1413,17 @@ class PathLockStore:
                     original_error=str(error),
                     readback_error=str(read_error),
                 ) from read_error
+
+            if snapshot_error is not None:
+                raise PathLockError(
+                    "PATH_LOCK_AUDIT_ROLLBACK_FAILED",
+                    "path lock mutation snapshot failed; pending recovery is required",
+                    transaction_pending=True,
+                    transaction_id=transaction["transaction_id"],
+                    original_error=str(error),
+                    snapshot_error=str(snapshot_error),
+                    readback_error=None,
+                ) from snapshot_error
 
             has_mutated = publish_succeeded or (current_on_disk != before_apply)
             if has_mutated:

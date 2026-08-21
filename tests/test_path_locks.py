@@ -488,6 +488,40 @@ class PathLockStoreTests(unittest.TestCase):
         recovered.recover_pending(actor="recovery")
         self.assertFalse(recovered.transaction_path.exists())
         self.assertEqual(recovered.list(), [])
+    def test_transient_snapshot_read_failure_keeps_stable_pending_state(self):
+        record = self.store.lock("alice", ["src/transient.py"], lease_seconds=60)
+        path = self.channel / "locks" / f"{record.lock_id}.json"
+        existing = path.read_bytes()
+        original_read_bytes = Path.read_bytes
+        self.assertTrue(path.exists())
+        calls = {"count": 0}
+
+        def transient_read():
+            if calls["count"] == 0:
+                calls["count"] += 1
+                raise OSError("transient snapshot failure")
+            return original_read_bytes(path)
+
+        with mock.patch.object(Path, "read_bytes", side_effect=transient_read):
+            with self.assertRaises(PathLockError) as error:
+                self.store._run_transaction(
+                    operation="recover",
+                    event="path.lock.recovered",
+                    path=path,
+                    before=existing,
+                    after=existing,
+                    actor="alice",
+                    record=record,
+                    apply=lambda: False,
+                )
+        self.assertEqual(calls["count"], 1, repr(error.exception))
+        self.assertEqual(error.exception.code, "PATH_LOCK_AUDIT_ROLLBACK_FAILED")
+        self.assertTrue(self.store.transaction_path.exists())
+        self.assertEqual(path.read_bytes(), existing)
+        self.store.recover_pending(actor="recovery")
+        self.assertFalse(self.store.transaction_path.exists())
+        self.assertEqual(self.store.load(record.lock_id), record)
+
     def test_recovery_reason_rejects_control_and_surrogate_unicode(self):
         record = self.store.lock("alice", ["src/main.py"], lease_seconds=1)
         lock_path = self.channel / "locks" / f"{record.lock_id}.json"
