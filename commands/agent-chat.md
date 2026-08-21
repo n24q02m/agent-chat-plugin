@@ -50,6 +50,7 @@ python ${CLAUDE_PLUGIN_ROOT}/chat.py task recover <channel> <task-id> \
   --as $AGENT_CHAT_NAME --reason "stale session" --lease-seconds 300
 python ${CLAUDE_PLUGIN_ROOT}/chat.py task recover-pending <channel> \
   --as $AGENT_CHAT_NAME
+```
 
 `claim`, `renew`, and `recover` accept `--lease-seconds`, `--lease`, or
 `--ttl`. The duration must be positive and finite. A claim requires all direct

@@ -1021,5 +1021,98 @@ class LeaseStoreTests(unittest.TestCase):
         self.assertEqual(len(list((self.channel / "claims").glob("T-0001.*.json"))), 1)
         self.assertFalse(self.leases.transaction_path.exists())
 
+    def test_same_owner_published_recovery_collapses_duplicate_path_deltas(self):
+        self.create_task()
+        self.leases.claim("T-0001", "alice", lease_seconds=30)
+        self.expire_claim()
+        original_remove = self.leases._remove_transaction
+
+        def fail_cleanup():
+            raise OSError("injected same-owner cleanup failure")
+
+        self.leases._remove_transaction = fail_cleanup
+        with self.assertRaises(LeaseError) as error:
+            self.leases.recover(
+                "T-0001", "alice", "same owner resumed", lease_seconds=30
+            )
+        self.assertEqual(error.exception.code, "LEASE_TRANSACTION_CLEANUP_FAILED")
+        self.leases._remove_transaction = original_remove
+
+        pending = LeaseStore(self.channel)
+        pending.recover_pending(actor="recovery")
+        self.assertEqual(
+            (self.tasks.show("T-0001").status, self.tasks.show("T-0001").owner),
+            ("in_progress", "alice"),
+        )
+        self.assertEqual(len(list((self.channel / "claims").glob("*.json"))), 1)
+        self.assertFalse(self.leases.transaction_path.exists())
+
+    def test_unleased_preassigned_owner_pending_rollback_is_valid(self):
+        self.create_task(owner="alice")
+        self.tasks.update("T-0001", actor="alice", status="in_progress")
+
+        def crash_audit(*args, **kwargs):
+            raise SystemExit("simulated unleased completion crash")
+
+        self.leases.tasks._post_event = crash_audit
+        with self.assertRaises(SystemExit):
+            self.leases.complete_or_done("T-0001", "alice")
+
+        pending = LeaseStore(self.channel)
+        pending.recover_pending(actor="recovery")
+        restored = self.tasks.show("T-0001")
+        self.assertEqual((restored.status, restored.owner), ("in_progress", "alice"))
+        self.assertIsNone(restored.lease_expires_at)
+        self.assertFalse(self.leases.transaction_path.exists())
+
+    def test_repeated_same_event_does_not_publish_new_applied_transaction(self):
+        self.create_task()
+        self.leases.claim("T-0001", "alice", lease_seconds=30)
+        self.leases.release("T-0001", "alice")
+        original_set_phase = self.leases._set_transaction_phase
+
+        def crash_applied(phase):
+            original_set_phase(phase)
+            if phase == "applied":
+                raise SystemExit("simulated crash before second audit")
+
+        self.leases._set_transaction_phase = crash_applied
+        with self.assertRaises(SystemExit):
+            self.leases.claim("T-0001", "alice", lease_seconds=30)
+        self.leases._set_transaction_phase = original_set_phase
+
+        pending = LeaseStore(self.channel)
+        pending.recover_pending(actor="recovery")
+        restored = self.tasks.show("T-0001")
+        self.assertEqual((restored.status, restored.owner), ("open", None))
+        self.assertEqual(list((self.channel / "claims").glob("*.json")), [])
+        self.assertFalse(self.leases.transaction_path.exists())
+
+    def test_legacy_v1_pending_marker_recovers_without_blocking(self):
+        self.create_task()
+        self.leases.claims_dir.mkdir()
+        task_before = self.leases._encode_bytes(
+            (self.channel / "tasks" / "T-0001.json").read_bytes()
+        )
+        self.leases.transaction_path.write_text(
+            json.dumps(
+                {
+                    "version": 1,
+                    "task_id": "T-0001",
+                    "task_file": "tasks/T-0001.json",
+                    "task_before": task_before,
+                    "claim_changes": [],
+                    "event": "lease.claimed",
+                },
+                indent=2,
+            )
+            + "\n",
+            encoding="utf-8",
+        )
+
+        LeaseStore(self.channel).recover_pending(actor="recovery")
+        self.assertFalse(self.leases.transaction_path.exists())
+        self.assertEqual(self.tasks.show("T-0001").status, "open")
+
 if __name__ == "__main__":
     unittest.main()

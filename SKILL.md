@@ -55,6 +55,7 @@ chat.py task release <channel> <task-id> --as <agent>
 chat.py task recover <channel> <task-id> --as <agent> \
   --reason "stale session" --lease-seconds 300
 chat.py task recover-pending <channel> --as <agent>
+```
 
 `claim`, `renew`, and stale `recover` accept `--lease-seconds`, `--lease`, or
 `--ttl`; the value must be a positive finite duration. `claim` advances a ready

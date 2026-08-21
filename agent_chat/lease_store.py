@@ -14,6 +14,7 @@ import math
 import os
 import re
 import tempfile
+import uuid
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Any, Callable
@@ -605,10 +606,19 @@ class LeaseStore:
                 f"could not read transaction journal: {error}",
                 path=str(path),
             )
-        if not isinstance(raw, dict) or raw.get("version") != 1:
+        if not isinstance(raw, dict) or raw.get("version") not in {1, 2}:
             raise LeaseError(
                 "LEASE_TRANSACTION_INVALID",
                 "transaction journal has an unsupported shape",
+                path=str(path),
+            )
+        if raw.get("version") == 2 and (
+            not isinstance(raw.get("transaction_id"), str)
+            or not raw["transaction_id"]
+        ):
+            raise LeaseError(
+                "LEASE_TRANSACTION_INVALID",
+                "transaction journal is missing transaction_id",
                 path=str(path),
             )
         for field in ("task_file", "task_before", "claim_changes", "event"):
@@ -737,8 +747,9 @@ class LeaseStore:
         self._assert_no_pending_transaction()
         self._ensure_claims_dir()
         payload = {
-            "version": 1,
+            "version": 2,
             "phase": "prepared",
+            "transaction_id": uuid.uuid4().hex,
             "task_id": current.id,
             "task_file": task_path.relative_to(self.channel).as_posix(),
             "task_before": self._encode_bytes(task_path.read_bytes()),
@@ -810,18 +821,19 @@ class LeaseStore:
                 + "\n"
             ).encode("utf-8"),
         )
-
-    def _audit_event_exists(self, event: str, task_id: str) -> bool:
-        event_marker = f'"event": "{event}"'
-        task_marker = f'"task_id": "{task_id}"'
+    def _audit_event_exists_for_transaction(self, transaction_id: Any) -> bool:
+        if not isinstance(transaction_id, str) or not transaction_id:
+            return False
+        marker = f'"transaction_id": "{transaction_id}"'
         for path in chat.message_files(self.channel):
             try:
                 body = path.read_text(encoding="utf-8")
             except (OSError, UnicodeDecodeError):
                 continue
-            if event_marker in body and task_marker in body:
+            if marker in body:
                 return True
         return False
+
 
     def recover_pending(self, *, actor: str = "recovery") -> None:
         """Rollback a crashed lease transaction after an explicit request."""
@@ -890,62 +902,41 @@ class LeaseStore:
                         "LEASE_TRANSACTION_INVALID",
                         "transaction journal task_before record mismatch",
                     )
+                legacy_v1 = pending.get("version") == 1 and "task_after" not in pending
                 task_after = self._decode_bytes(pending.get("task_after"))
                 if task_after is None:
-                    raise LeaseError(
-                        "LEASE_TRANSACTION_INVALID",
-                        "transaction journal has no task_after rollback bytes",
-                    )
-                try:
-                    decoded_after_json = json.loads(task_after.decode("utf-8"))
-                except (UnicodeDecodeError, json.JSONDecodeError) as decode_error:
-                    raise LeaseError(
-                        "LEASE_TRANSACTION_INVALID",
-                        f"transaction journal task_after is not valid JSON: {decode_error}",
-                    ) from decode_error
-                if (
-                    not isinstance(decoded_after_json, dict)
-                    or decoded_after_json.get("id") != expected_task_id
-                ):
-                    raise LeaseError(
-                        "LEASE_TRANSACTION_INVALID",
-                        "transaction journal task_after id does not match task record",
-                    )
-                decoded_after_task = self.tasks.validate(decoded_after_json)
-                if decoded_after_task.id != expected_task_id:
-                    raise LeaseError(
-                        "LEASE_TRANSACTION_INVALID",
-                        "transaction journal task_after record mismatch",
-                    )
-                claim_rollbacks: list[
-                    tuple[Path, bytes | None, bytes | None, LeaseRecord | None]
-                ] = []
-                decoded_after = None
-                if "task_after" in pending:
-                    task_after_bytes = self._decode_bytes(pending.get("task_after"))
-                    if task_after_bytes is None:
+                    if not legacy_v1:
                         raise LeaseError(
                             "LEASE_TRANSACTION_INVALID",
-                            "transaction journal task_after is empty",
+                            "transaction journal has no task_after rollback bytes",
                         )
+                    decoded_after_task = decoded_task
+                else:
                     try:
-                        task_after_json = json.loads(
-                            task_after_bytes.decode("utf-8")
-                        )
-                    except (UnicodeDecodeError, json.JSONDecodeError) as error:
+                        decoded_after_json = json.loads(task_after.decode("utf-8"))
+                    except (UnicodeDecodeError, json.JSONDecodeError) as decode_error:
                         raise LeaseError(
                             "LEASE_TRANSACTION_INVALID",
-                            f"transaction journal task_after is not valid JSON: {error}",
-                        ) from error
+                            f"transaction journal task_after is not valid JSON: {decode_error}",
+                        ) from decode_error
                     if (
-                        not isinstance(task_after_json, dict)
-                        or task_after_json.get("id") != expected_task_id
+                        not isinstance(decoded_after_json, dict)
+                        or decoded_after_json.get("id") != expected_task_id
                     ):
                         raise LeaseError(
                             "LEASE_TRANSACTION_INVALID",
-                            "transaction task_after id does not match task_file",
+                            "transaction journal task_after id does not match task record",
                         )
-                    decoded_after = self.tasks.validate(task_after_json)
+                    decoded_after_task = self.tasks.validate(decoded_after_json)
+                    if decoded_after_task.id != expected_task_id:
+                        raise LeaseError(
+                            "LEASE_TRANSACTION_INVALID",
+                            "transaction journal task_after record mismatch",
+                        )
+                claim_rollbacks: list[
+                    tuple[Path, bytes | None, bytes | None, LeaseRecord | None]
+                ] = []
+                decoded_after = None if legacy_v1 else decoded_after_task
                 next_records: list[LeaseRecord] = []
                 previous_records: list[LeaseRecord] = []
                 for change in pending.get("claim_changes", []):
@@ -1021,11 +1012,33 @@ class LeaseStore:
                     claim_rollbacks.append(
                         (claim_path, previous, next_payload, next_record)
                     )
-                if len(previous_records) > 1:
-                    raise LeaseError(
-                        "LEASE_TRANSACTION_INVALID",
-                        "transaction has multiple active previous claims",
+                by_path: dict[
+                    Path, tuple[Path, bytes | None, bytes | None, LeaseRecord | None]
+                ] = {}
+                for entry in claim_rollbacks:
+                    path, previous, next_payload, next_record = entry
+                    prior = by_path.get(path)
+                    if prior is not None:
+                        if prior[1] != previous:
+                            raise LeaseError(
+                                "LEASE_TRANSACTION_INVALID",
+                                "duplicate claim path has conflicting previous payloads",
+                                file=path.name,
+                            )
+                    by_path[path] = (path, prior[1] if prior else previous, next_payload, next_record)
+                claim_rollbacks = list(by_path.values())
+                previous_records = []
+                next_records = []
+                for path, previous, next_payload, next_record in claim_rollbacks:
+                    previous_record = self._claim_record_from_bytes(
+                        previous,
+                        filename=path.name,
+                        field="previous",
                     )
+                    if previous_record is not None:
+                        previous_records.append(previous_record)
+                    if next_record is not None:
+                        next_records.append(next_record)
                 if decoded_task.owner is not None and decoded_task.lease_expires_at is not None:
                     if not previous_records:
                         raise LeaseError(
@@ -1064,10 +1077,7 @@ class LeaseStore:
                                 "LEASE_TRANSACTION_INVALID",
                                 "task_after lease metadata does not match next claim",
                             )
-                    elif (
-                        decoded_after.owner is not None
-                        or decoded_after.lease_expires_at is not None
-                    ):
+                    elif decoded_after.lease_expires_at is not None:
                         raise LeaseError(
                             "LEASE_TRANSACTION_INVALID",
                             "task_after retains lease metadata without a next claim",
@@ -1078,9 +1088,8 @@ class LeaseStore:
                         "LEASE_TRANSACTION_INVALID",
                         f"unsupported transaction phase: {phase!r}",
                     )
-                if phase == "applied" and self._audit_event_exists(
-                    pending["event"],
-                    pending["task_id"],
+                if phase == "applied" and self._audit_event_exists_for_transaction(
+                    pending.get("transaction_id")
                 ):
                     phase = "published"
                 if phase == "published":
@@ -1172,6 +1181,17 @@ class LeaseStore:
             event=event,
             details=details,
         )
+        pending = self._read_transaction()
+        transaction_id = pending.get("transaction_id") if pending else None
+        if not isinstance(transaction_id, str) or not transaction_id:
+            raise LeaseError(
+                "LEASE_TRANSACTION_INVALID",
+                "new transaction journal has no transaction_id",
+                task_id=current.id,
+                event=event,
+            )
+        event_details = dict(details)
+        event_details["transaction_id"] = transaction_id
         task_written = False
         audit_published = False
         try:
@@ -1195,7 +1215,7 @@ class LeaseStore:
                 candidate,
                 actor=actor,
                 previous=current,
-                details=details,
+                details=event_details,
             )
             audit_published = True
             self._set_transaction_phase("published")
