@@ -521,6 +521,21 @@ class PathLockStoreTests(unittest.TestCase):
                 "actor": "alice",
             }
         )
+        stderr = io.StringIO()
+        with contextlib.redirect_stderr(stderr):
+            with self.assertRaises(SystemExit) as exit_status:
+                chat.main(
+                    [
+                        "--root",
+                        str(self.root),
+                        "check",
+                        "review",
+                        "src/new7.py",
+                    ]
+                )
+        self.assertEqual(exit_status.exception.code, 1)
+        self.assertIn("PATH_LOCK_TRANSACTION_PENDING", stderr.getvalue())
+
         output = io.StringIO()
         with contextlib.redirect_stdout(output):
             chat.main(
@@ -537,6 +552,32 @@ class PathLockStoreTests(unittest.TestCase):
             )
         self.assertIn("recovered pending path-lock transaction in review", output.getvalue())
         self.assertFalse(self.store.transaction_path.exists())
+
+        check_output = io.StringIO()
+        with contextlib.redirect_stdout(check_output):
+            chat.main(
+                [
+                    "--root",
+                    str(self.root),
+                    "check",
+                    "review",
+                    "src/new7.py",
+                ]
+            )
+        self.assertIn("locked", check_output.getvalue())
+    def test_create_collision_does_not_unlink_existing_record(self):
+        first = self.store.lock("alice", ["src/main.py"], lease_seconds=60)
+        lock_path = self.channel / "locks" / f"{first.lock_id}.json"
+        original_bytes = lock_path.read_bytes()
+
+        with mock.patch("uuid.uuid4", return_value=SimpleNamespace(hex=first.lock_id)):
+            with self.assertRaises(PathLockError) as error:
+                self.store.lock("bob", ["src/different.py"], lease_seconds=60)
+            self.assertEqual(error.exception.code, "PATH_LOCK_CONFLICT")
+
+        self.assertTrue(lock_path.exists())
+        self.assertEqual(lock_path.read_bytes(), original_bytes)
+        self.assertEqual(self.store.load(first.lock_id).owner, "alice")
 
 if __name__ == "__main__":
     unittest.main()

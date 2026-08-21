@@ -903,7 +903,7 @@ def build_parser() -> argparse.ArgumentParser:
         help="recover a pending crashed path-lock transaction",
     )
     s.add_argument("channel")
-    s.add_argument("--as", "--from", dest="actor", required=True)
+    s.add_argument("--as", "--from", "--owner", dest="actor", required=True)
     s.add_argument(
         "--resolve-publication",
         dest="publication_resolution",

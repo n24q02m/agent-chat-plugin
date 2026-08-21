@@ -1396,7 +1396,12 @@ class PathLockStore:
                     readback_error=str(read_error),
                 ) from read_error
 
-            has_mutated = applied or (current_on_disk != before)
+            if before is None:
+                has_mutated = applied or (after is not None and current_on_disk == after)
+            elif after is None:
+                has_mutated = applied or (current_on_disk != before)
+            else:
+                has_mutated = applied or (current_on_disk == after)
             if has_mutated:
                 try:
                     self._restore_bytes(path, before)
