@@ -54,17 +54,20 @@ chat.py task block <channel> <task-id> --as <agent>
 chat.py task release <channel> <task-id> --as <agent>
 chat.py task recover <channel> <task-id> --as <agent> \
   --reason "stale session" --lease-seconds 300
-```
+chat.py task recover-pending <channel> --as <agent>
 
-`claim`, `renew`, and `recover` accept `--lease-seconds`, `--lease`, or
+`claim`, `renew`, and stale `recover` accept `--lease-seconds`, `--lease`, or
 `--ttl`; the value must be a positive finite duration. `claim` advances a ready
 task to `in_progress`, assigns the owner, and writes its expiry atomically with
 the claim record. Only the owner can renew, release, or complete an unexpired
 claim. `task done` clears an active claim atomically; when no claim exists it
 preserves the direct Task 3 transition. `task release` similarly preserves the
 unleased Task 3 transition. An expired claim is never silently stolen:
-`task recover` requires a new owner and non-empty reason and records
+stale `task recover` requires a new owner and non-empty reason and records
 `previous_owner`, `previous_lease_expires_at`, and `recovery_reason`.
+After a crash, `task recover-pending <channel> --as <agent>` explicitly
+finishes cleanup/rollback of the durable transaction marker; it never silently
+steals or reassigns a stale task.
 
 `create` accepts `--owner`, `--depends-on`, `--files-hint`, `--acceptance`, and
 `--branch`. Repeat list options to add multiple values. `update` accepts
@@ -99,11 +102,13 @@ Task codes include `TASK_INVALID_COMMAND`, `TASK_INVALID_ARGUMENT`,
 `LEASE_INVALID_RECORD`, `LEASE_REQUIRED_FIELD_MISSING`, `LEASE_UNKNOWN_FIELD`,
 `LEASE_RECORD_ID_MISMATCH`, `LEASE_STORAGE_INVALID`,
 `LEASE_PATH_OUTSIDE_WORKSPACE`, `LEASE_TRANSACTION_PENDING`,
-`LEASE_TRANSACTION_INVALID`, `LEASE_TRANSACTION_NOT_FOUND`,
-`LEASE_TRANSACTION_RECOVERY_FAILED`, `LEASE_AUDIT_FAILED`, and
-`LEASE_AUDIT_ROLLBACK_FAILED`. Lease writes use an atomic transaction marker;
-after a crash, access fails closed until `LeaseStore.recover_pending()` rolls
-the prior records back explicitly.
+`LEASE_TRANSACTION_CLEANUP_FAILED`, `LEASE_TRANSACTION_INVALID`,
+`LEASE_TRANSACTION_NOT_FOUND`, `LEASE_TRANSACTION_RECOVERY_FAILED`,
+`LEASE_AUDIT_FAILED`, and `LEASE_AUDIT_ROLLBACK_FAILED`. Lease writes use a
+durable transaction marker with prepared/applied/published phases; after a
+crash or cleanup failure, access fails closed until
+`task recover-pending`/`LeaseStore.recover_pending()` explicitly rolls back
+or finishes the published transaction.
 
 `--reply <seq>` threads a message to an earlier one. `python chat.py <cmd> --help` for all flags.
 
