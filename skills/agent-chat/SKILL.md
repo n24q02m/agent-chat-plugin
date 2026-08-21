@@ -58,14 +58,18 @@ chat.py task release <channel> <task-id> --as <agent>
 nullable fields back to `null`. List values may also be comma-separated.
 
 Task statuses are `open`, `in_progress`, `blocked`, `done`, and `cancelled`.
-`done` is terminal. `task done` requires `in_progress`; `task block` moves an
-`open` or `in_progress` task to `blocked`; and `task release` moves a
-`blocked` or `in_progress` task to `open`. A task can advance to
-`in_progress` or `done` only when every ID in `depends_on` has a task record
-whose status is `done`. Readiness is computed from task JSON records, never
-from message text.
+`done` and `cancelled` are terminal. Transitions allow `open` -> `in_progress` |
+`blocked` | `cancelled`, `in_progress` -> `open` | `blocked` | `done` |
+`cancelled`, and `blocked` -> `open` | `in_progress` | `cancelled`. Same-state
+writes are intentionally idempotent. `task done` moves `in_progress` (or
+idempotent `done`) to `done`; `task block` moves `open`, `in_progress`, or
+`blocked` to `blocked`; and `task release` moves `blocked`, `in_progress`, or
+`open` to `open`. A task can advance to `in_progress` or `done` only when
+every ID in `depends_on` has a task record whose status is `done`. Readiness is
+computed from task JSON records, never from message text.
 
-Task failures are nonzero and include one stable code: `TASK_CHANNEL_NOT_FOUND`,
+Task failures are nonzero (exit status 2) and include one stable code:
+`TASK_INVALID_COMMAND`, `TASK_INVALID_ARGUMENT`, `TASK_CHANNEL_NOT_FOUND`,
 `TASK_NOT_FOUND`, `TASK_ALREADY_EXISTS`, `TASK_INVALID_STATUS`,
 `TASK_INVALID_UPDATE`, `TASK_INVALID_TRANSITION`,
 `TASK_DEPENDENCY_NOT_READY`, `TASK_UNKNOWN_DEPENDENCY`,

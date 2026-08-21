@@ -443,6 +443,26 @@ class TaskStore:
     def show(self, task_id: str) -> TaskRecord:
         return self.load(task_id)
 
+    def show_with_dependencies(
+        self, task_id: str
+    ) -> tuple[TaskRecord, dict[str, str], bool]:
+        """Return task record, dependency statuses, and readiness under one lock."""
+        path = self._task_path(task_id)
+        with self._mutation_lock():
+            records = self._read_snapshot()
+            tasks = {record.id: record for record in records}
+            task = tasks.get(path.stem)
+            if task is None:
+                raise TaskValidationError(
+                    "TASK_NOT_FOUND", f"task record does not exist: {task_id}"
+                )
+            statuses = {
+                dependency: tasks[dependency].status
+                for dependency in task.depends_on
+            }
+            ready = not self._dependency_blockers(task, records)
+            return task, statuses, ready
+
     def list(self) -> list[TaskRecord]:
         with self._mutation_lock():
             return self._read_snapshot()
@@ -551,6 +571,15 @@ def show_task(
 ) -> TaskRecord:
     return TaskStore(channel, root=root).show(task_id)
 
+def show_task_with_dependencies(
+    channel: Path | str,
+    task_id: str,
+    *,
+    root: Path | str | None = None,
+) -> tuple[TaskRecord, dict[str, str], bool]:
+    return TaskStore(channel, root=root).show_with_dependencies(task_id)
+
+
 
 def list_tasks(
     channel: Path | str,
@@ -603,5 +632,6 @@ __all__ = [
     "list_tasks",
     "load_task",
     "show_task",
+    "show_task_with_dependencies",
     "update_task",
 ]

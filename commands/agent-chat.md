@@ -49,11 +49,14 @@ accepted). `update` can change `--title`, `--owner`, `--depends-on`,
 branch can be cleared with `--clear-owner` and `--clear-branch`.
 
 The valid statuses are `open`, `in_progress`, `blocked`, `done`, and
-`cancelled`. `done` is terminal. `task done` requires `in_progress`;
-`task block` accepts `open` or `in_progress`; and `task release` accepts
-`blocked` or `in_progress`. A task can enter `in_progress` or `done` only if
-all dependency records are `done`; the CLI computes this from `tasks/*.json`,
-not message body text. Invalid transitions remain rejected.
+`cancelled`. `done` and `cancelled` are terminal. Allowed transitions match the
+state machine (`open` -> `in_progress` | `blocked` | `cancelled`,
+`in_progress` -> `open` | `blocked` | `done` | `cancelled`, and `blocked` ->
+`open` | `in_progress` | `cancelled`), with idempotent same-state writes
+permitted. `task done` targets `done`; `task block` targets `blocked`; and
+`task release` targets `open`. A task can enter `in_progress` or `done` only
+if all dependency records are `done`; the CLI computes this from
+`tasks/*.json`, not message body text. Invalid transitions remain rejected.
 
 Successful commands have deterministic output, for example:
 
@@ -63,7 +66,8 @@ T-0001  open  -  -  Document the review flow
 dependencies: ready
 ```
 
-Task failures exit nonzero and include a stable code. Common failures include
+Task failures exit nonzero (exit status 2) and include a stable code. Common
+failures include `TASK_INVALID_COMMAND`, `TASK_INVALID_ARGUMENT`,
 `TASK_CHANNEL_NOT_FOUND`, `TASK_NOT_FOUND`, `TASK_ALREADY_EXISTS`,
 `TASK_INVALID_STATUS`, `TASK_INVALID_UPDATE`, `TASK_INVALID_TRANSITION`,
 `TASK_DEPENDENCY_NOT_READY`, `TASK_UNKNOWN_DEPENDENCY`,

@@ -8,6 +8,7 @@ import tempfile
 import unittest
 from pathlib import Path
 from types import SimpleNamespace
+from unittest.mock import patch
 
 import chat
 from agent_chat.task_model import (
@@ -380,6 +381,70 @@ class TaskStoreTests(unittest.TestCase):
         self.assertTrue(any("task.updated" in body for body in bodies))
 
 
+    def test_show_dependency_snapshot_uses_one_authoritative_snapshot(self):
+
+        self.store.create(self.make_task(id="T-0001"), actor="alice")
+        self.store.create(
+            self.make_task(id="T-0002", depends_on=["T-0001"]),
+            actor="alice",
+        )
+        snapshot_started = threading.Event()
+        release_snapshot = threading.Event()
+        update_started = threading.Event()
+        update_finished = threading.Event()
+        snapshot_calls = []
+        shown = []
+        errors = []
+        original_snapshot = self.store._read_snapshot
+
+        def blocked_snapshot():
+            snapshot_calls.append(True)
+            snapshot_started.set()
+            if not release_snapshot.wait(2):
+                raise AssertionError("timed out waiting to release snapshot")
+            return original_snapshot()
+
+        self.store._read_snapshot = blocked_snapshot
+
+        def show_task():
+            try:
+                shown.append(self.store.show_with_dependencies("T-0002"))
+            except BaseException as error:
+                errors.append(error)
+
+        def update_dependency():
+            update_started.set()
+            try:
+                self.store.update(
+                    "T-0001", actor="alice", status="in_progress"
+                )
+                self.store.update("T-0001", actor="alice", status="done")
+            finally:
+                update_finished.set()
+
+        show_thread = threading.Thread(target=show_task)
+        update_thread = threading.Thread(target=update_dependency)
+        show_thread.start()
+        self.assertTrue(snapshot_started.wait(2))
+        update_thread.start()
+        self.assertTrue(update_started.wait(2))
+        try:
+            self.assertFalse(update_finished.wait(0.2))
+        finally:
+            release_snapshot.set()
+            show_thread.join(2)
+            update_thread.join(2)
+            self.store._read_snapshot = original_snapshot
+
+        self.assertEqual(errors, [])
+        self.assertEqual(len(snapshot_calls), 1)
+        task, statuses, ready = shown[0]
+        self.assertEqual(task.id, "T-0002")
+        self.assertEqual(statuses, {"T-0001": "open"})
+        self.assertFalse(ready)
+        self.assertTrue(self.store.dependencies_ready("T-0002"))
+
+
 class TaskCommandTests(unittest.TestCase):
     def setUp(self):
         self.temp_dir = tempfile.TemporaryDirectory()
@@ -553,6 +618,69 @@ class TaskCommandTests(unittest.TestCase):
         self.assertEqual(error, "")
         self.assertIn("posted #", output)
 
+
+    def test_task_status_commands_allow_idempotent_same_state_writes(self):
+        self.assertEqual(
+            self.run_cli(
+                "task",
+                "create",
+                "review",
+                "T-0001",
+                "--from",
+                "alice",
+                "--title",
+                "Idempotent transitions",
+            )[0],
+            0,
+        )
+        for command in ("release", "block", "block", "release", "release"):
+            with self.subTest(command=command):
+                code, _, error = self.run_cli(
+                    "task", command, "review", "T-0001", "--as", "alice"
+                )
+                self.assertEqual((code, error), (0, ""))
+
+        self.assertEqual(
+            self.run_cli(
+                "task",
+                "update",
+                "review",
+                "T-0001",
+                "--as",
+                "alice",
+                "--status",
+                "in_progress",
+            )[0],
+            0,
+        )
+        for command in ("done", "done"):
+            with self.subTest(command=command):
+                code, _, error = self.run_cli(
+                    "task", command, "review", "T-0001", "--as", "alice"
+                )
+                self.assertEqual((code, error), (0, ""))
+
+    def test_malformed_task_inputs_use_stable_errors(self):
+        code, _, error = self.run_cli(
+            "task",
+            "create",
+            "review",
+            "T-0001",
+            "--from",
+            "alice",
+        )
+        self.assertEqual(code, 2)
+        self.assertIn("TASK_INVALID_ARGUMENT", error)
+
+        code, _, error = self.run_cli("task", "unknown", "review")
+        self.assertEqual(code, 2)
+        self.assertIn("TASK_INVALID_COMMAND", error)
+
+        code, _, error = self.run_cli(
+            "task", "show", "../review", "T-0001"
+        )
+        self.assertEqual(code, 2)
+        self.assertIn("TASK_INVALID_CHANNEL", error)
 
 if __name__ == "__main__":
     unittest.main()

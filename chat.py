@@ -505,8 +505,17 @@ def cmd_claim(root: Path, a):
 
 def _task_store(root: Path, channel: str):
     from agent_chat.task_store import TaskStore
+    from agent_chat.task_model import TaskValidationError
 
-    return TaskStore(channel_dir(root, channel), root=root)
+    try:
+        chan = channel_dir(root, channel)
+    except AgentChatError as error:
+        raise TaskValidationError(
+            "TASK_INVALID_CHANNEL",
+            f"invalid channel name: '{channel}' ({error})",
+        ) from error
+    return TaskStore(chan, root=root)
+
 
 
 
@@ -572,9 +581,10 @@ def cmd_task_list(root: Path, a):
 
 def cmd_task_show(root: Path, a):
     store = _task_store(root, a.channel)
-    task = store.show(a.task_id)
-    statuses = store.dependency_statuses(task.id)
+    task, statuses, ready = store.show_with_dependencies(a.task_id)
     if not statuses:
+        dependency_summary = "ready"
+    elif ready:
         dependency_summary = "ready"
     else:
         blocked = [
@@ -582,7 +592,7 @@ def cmd_task_show(root: Path, a):
             for dependency, status in statuses.items()
             if status != "done"
         ]
-        dependency_summary = "ready" if not blocked else "blocked (" + ", ".join(blocked) + ")"
+        dependency_summary = "blocked (" + ", ".join(blocked) + ")"
     print(f"id: {task.id}")
     print(f"channel: {task.channel}")
     print(f"title: {task.title}")
@@ -645,6 +655,29 @@ def cmd_task_release(root: Path, a):
 # --- argparse ----------------------------------------------------------------
 
 
+class _TaskArgumentParser(argparse.ArgumentParser):
+    def error(self, message: str):
+        from agent_chat.task_model import TaskValidationError
+
+        lower = message.lower()
+        if (
+            "invalid choice" in lower
+            or "unknown subcommand" in lower
+            or "unrecognized arguments" in lower
+        ):
+            code = "TASK_INVALID_COMMAND"
+        elif (
+            "required" in lower
+            or "missing" in lower
+            or "invalid" in lower
+            or "expected" in lower
+        ):
+            code = "TASK_INVALID_ARGUMENT"
+        else:
+            code = "TASK_INVALID_ARGUMENT"
+        raise TaskValidationError(code, f"cli error: {message}")
+
+
 def build_parser() -> argparse.ArgumentParser:
     p = argparse.ArgumentParser(
         prog="chat.py", description="peer agent chat over markdown files"
@@ -653,6 +686,7 @@ def build_parser() -> argparse.ArgumentParser:
         "--root", help="chat root dir (default: $AGENT_CHAT_ROOT or ~/agent-chat)"
     )
     sub = p.add_subparsers(dest="cmd", required=True)
+
 
     s = sub.add_parser("init", help="create a channel")
     s.add_argument("channel")
@@ -708,8 +742,16 @@ def build_parser() -> argparse.ArgumentParser:
     s.add_argument("task", help="task marker filename, e.g. task-12.md")
     s.add_argument("--as", dest="agent", required=True)
     s.set_defaults(func=cmd_claim)
-    task = sub.add_parser("task", help="manage structured task records")
-    task_sub = task.add_subparsers(dest="task_cmd", required=True)
+    task = sub.add_parser(
+        "task",
+        help="manage structured task records",
+    )
+    task_sub = task.add_subparsers(
+        dest="task_cmd",
+        required=True,
+        parser_class=_TaskArgumentParser,
+    )
+    task.error = _TaskArgumentParser.error.__get__(task, _TaskArgumentParser)
 
     s = task_sub.add_parser("create", help="create a task record")
     s.add_argument("channel")
@@ -771,16 +813,19 @@ def _is_task_error(error: Exception) -> bool:
 
 
 def main(argv=None):
-    args = build_parser().parse_args(argv)
-    root = root_dir(args.root)
-
     try:
+        args = build_parser().parse_args(argv)
+        root = root_dir(args.root)
         args.func(root, args)
     except AgentChatError as e:
         die(str(e))
     except KeyboardInterrupt:
         print(file=sys.stderr)  # print a newline to cleanly break from input prompts
         die("cancelled by user", code=130)
+    except OSError as error:
+        if "args" in locals() and getattr(args, "cmd", None) == "task":
+            die(f"TASK_IO_ERROR: {error}", code=2)
+        raise
     except Exception as error:
         if _is_task_error(error):
             die(str(error), code=2)
