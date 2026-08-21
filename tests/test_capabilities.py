@@ -72,6 +72,19 @@ class CapabilityEventTests(unittest.TestCase):
             chat.validate_adapter_event(invalid)
         self.assertEqual(primitive_error.exception.code, "EVENT_UNKNOWN_PRIMITIVE")
 
+        malformed_primitives = {**event, "primitives": [[]]}
+        with self.assertRaises(chat.AdapterEventError) as malformed_error:
+            chat.validate_adapter_event(malformed_primitives)
+        self.assertEqual(malformed_error.exception.code, "EVENT_INVALID_PRIMITIVES")
+
+        malformed_detail = chat.make_status_event(
+            "alice", "omp", "ready", detail="ok", timestamp=TIMESTAMP
+        )
+        malformed_detail["detail"] = "\ud800"
+        with self.assertRaises(chat.AdapterEventError) as detail_error:
+            chat.validate_adapter_event(malformed_detail)
+        self.assertEqual(detail_error.exception.code, "EVENT_INVALID_TEXT")
+
     def test_malformed_version_type_timestamp_and_status_fail_closed(self):
         base = chat.make_capability_event("alice", "omp", timestamp=TIMESTAMP)
         cases = [

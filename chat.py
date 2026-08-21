@@ -145,8 +145,12 @@ def validate_adapter_event(value: object) -> dict:
     normalized = dict(value)
     if event_type == "capability":
         primitives = value.get("primitives")
-        if not isinstance(primitives, list) or not primitives:
-            raise AdapterEventError("EVENT_INVALID_PRIMITIVES", "primitives must be non-empty")
+        if (
+            not isinstance(primitives, list)
+            or not primitives
+            or any(not isinstance(primitive, str) for primitive in primitives)
+        ):
+            raise AdapterEventError("EVENT_INVALID_PRIMITIVES", "primitives must be strings")
         if len(set(primitives)) != len(primitives):
             raise AdapterEventError("EVENT_DUPLICATE_PRIMITIVE", "primitives must be unique")
         for primitive in primitives:
@@ -160,9 +164,16 @@ def validate_adapter_event(value: object) -> dict:
         if "detail" in value:
             detail = value["detail"]
             if not isinstance(detail, str) or any(
-                ord(char) < 32 or 0xD800 <= ord(char) <= 0xDFFF for char in detail
+                ord(char) < 32
+                or 0x7F <= ord(char) <= 0x9F
+                or 0xD800 <= ord(char) <= 0xDFFF
+                for char in detail
             ):
                 raise AdapterEventError("EVENT_INVALID_TEXT", "detail is invalid")
+            try:
+                detail.encode("utf-8")
+            except UnicodeEncodeError as error:
+                raise AdapterEventError("EVENT_INVALID_TEXT", "detail is invalid") from error
     return normalized
 
 
