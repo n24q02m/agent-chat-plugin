@@ -319,7 +319,7 @@ def _read_body(a) -> str:
     if a.body_file:
         try:
             return Path(a.body_file).read_text(encoding="utf-8")
-        except OSError as e:
+        except (OSError, ValueError) as e:
             raise AgentChatError(f"could not read body file: {e}")
     # Default: read from stdin so agents can pipe long markdown bodies.
     if sys.stdin.isatty():
@@ -371,7 +371,12 @@ def cmd_post(root: Path, a):
 
 def _print_message(path: Path):
     print("=" * 70)
-    print(path.read_text(encoding="utf-8").rstrip())
+    try:
+        print(path.read_text(encoding="utf-8").rstrip())
+    except ValueError:
+        print(f"(error: could not read message {path.name} - invalid encoding)")
+    except OSError as e:
+        print(f"(error: could not read message {path.name} - {e})")
     print()
 
 
