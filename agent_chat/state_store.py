@@ -379,6 +379,7 @@ class StateStore:
         decisions: list[DecisionRecord] = []
         message_blockers: list[BlockerRecord] = []
         verifications: list[VerificationRecord] = []
+        completion_actors: dict[str, str] = {}
 
         for p in msg_files:
             seq = chat._seq_from_name(p.name) or 0
@@ -401,6 +402,19 @@ class StateStore:
             title = str(meta.get("title") or p.stem)
             msg_type = str(meta.get("type") or "").lower()
             msg_status = str(meta.get("status") or "").lower()
+
+            if msg_status in {"lease.completed", "task.updated"}:
+                try:
+                    audit_event = json.loads(body)
+                except json.JSONDecodeError:
+                    audit_event = None
+                if (
+                    isinstance(audit_event, dict)
+                    and audit_event.get("event") == msg_status
+                    and audit_event.get("status") == "done"
+                    and isinstance(audit_event.get("task_id"), str)
+                ):
+                    completion_actors[audit_event["task_id"]] = author
 
             # Check Decision
             is_decision = (
@@ -544,7 +558,7 @@ class StateStore:
                     VerificationRecord(
                         source_type="task",
                         source_id=t.id,
-                        author=t.owner or t.created_by,
+                        author=completion_actors.get(t.id, t.owner or t.created_by),
                         time=t.updated_at,
                         title=f"Task {t.id} completed: {t.title}",
                         evidence=f"Completed task criteria satisfied for {t.id}.",

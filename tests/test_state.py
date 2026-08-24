@@ -464,6 +464,37 @@ class StateStoreTests(unittest.TestCase):
         summary = self.state_store.summarize(now=TIMESTAMP_FIXED)
         self.assertGreaterEqual(len(summary.verification), 4)
 
+    def test_completed_task_verification_uses_completion_actor(self):
+        """Completed lease evidence is attributed to the actor who completed it."""
+        self.task_store.create(
+            TaskRecord.from_dict(
+                {
+                    "id": "T-0100",
+                    "channel": "review",
+                    "title": "Actor attribution",
+                    "status": "open",
+                    "owner": None,
+                    "created_by": "alice",
+                    "depends_on": [],
+                    "files_hint": [],
+                    "acceptance": ["Attribution is accurate"],
+                    "lease_expires_at": None,
+                    "branch": None,
+                    "updated_at": TIMESTAMP_FIXED,
+                }
+            ),
+            actor="alice",
+        )
+        self.lease_store.claim("T-0100", "bob", actor="bob")
+        self.lease_store.complete("T-0100", "bob", actor="bob")
+
+        summary = self.state_store.summarize()
+        verification = next(
+            record for record in summary.verification if record.source_id == "T-0100"
+        )
+
+        self.assertEqual(verification.author, "bob")
+
     # -------------------------------------------------------------------------
     # 3. Compaction and Non-Destructive Preservation Invariants
     # -------------------------------------------------------------------------
