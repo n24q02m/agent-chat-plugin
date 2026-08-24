@@ -2,27 +2,21 @@
 
 import io
 import json
-import os
 import tempfile
 import unittest
 from contextlib import redirect_stdout
 from pathlib import Path
 from types import SimpleNamespace
-from unittest.mock import patch
 
 import chat
 from agent_chat.lease_store import LeaseStore
 from agent_chat.path_locks import PathLockStore
 from agent_chat.state_store import (
     STATE_FILENAME,
-    BlockerRecord,
-    DecisionRecord,
-    OwnerAssignment,
     StateError,
     StateStore,
     StateSummary,
     StateValidationError,
-    VerificationRecord,
     compact_state,
     load_state,
     render_state,
@@ -89,7 +83,7 @@ class StateStoreTests(unittest.TestCase):
                 if extra_frontmatter:
                     for k, v in extra_frontmatter.items():
                         fm_lines.append(f"{k}: {v}")
-                new_text = f"---\n" + "\n".join(fm_lines) + f"\n---\n{parts[2].lstrip()}"
+                new_text = "---\n" + "\n".join(fm_lines) + f"\n---\n{parts[2].lstrip()}"
                 latest.write_text(new_text, encoding="utf-8")
         return latest
 
@@ -229,7 +223,7 @@ class StateStoreTests(unittest.TestCase):
         self.assertEqual(dec_seqs, sorted(dec_seqs))
 
         # Path locks must be sorted deterministically
-        lock_ids = [l.lock_id for l in summary.path_locks]
+        lock_ids = [lock.lock_id for lock in summary.path_locks]
         self.assertEqual(lock_ids, sorted(lock_ids))
 
         # Owners must be sorted alphabetically
@@ -502,12 +496,22 @@ class StateStoreTests(unittest.TestCase):
     def test_compaction_never_deletes_or_mutates_authoritative_sources(self):
         """Compaction writes state.md but NEVER deletes or mutates messages, tasks, claims, locks, or cursors."""
         # 1. Post messages
-        m1 = self._post_msg(sender="alice", title="Msg 1", body="First message")
-        m2 = self._post_msg(sender="bob", title="Decision: Chosen path", body="Details", msg_type="decision")
-        m3 = self._post_msg(sender="alice", title="Verification: Verified", body="Evidence", msg_type="verification")
+        self._post_msg(sender="alice", title="Msg 1", body="First message")
+        self._post_msg(
+            sender="bob",
+            title="Decision: Chosen path",
+            body="Details",
+            msg_type="decision",
+        )
+        self._post_msg(
+            sender="alice",
+            title="Verification: Verified",
+            body="Evidence",
+            msg_type="verification",
+        )
 
         # 2. Create tasks and claim
-        t1 = self.task_store.create(
+        self.task_store.create(
             TaskRecord.from_dict(
                 {
                     "id": "T-0001",
@@ -714,7 +718,6 @@ class StateStoreTests(unittest.TestCase):
         lock_path = next((self.channel / "locks").glob("*.json"))
         outside = self.root / "outside-lock.json"
         outside.write_bytes(lock_path.read_bytes())
-        lock_name = lock_path.name
         lock_path.unlink()
         try:
             lock_path.symlink_to(outside)

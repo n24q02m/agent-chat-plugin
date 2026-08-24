@@ -1,12 +1,10 @@
 """Focused Task 4 tests for atomic task leases and explicit recovery."""
 
 import contextlib
-import base64
 import io
 import json
 import os
 import threading
-import time
 import tempfile
 import unittest
 from pathlib import Path
