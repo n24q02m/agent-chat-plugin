@@ -79,11 +79,25 @@ python chat.py init review --members alice,bob --topic "code review"
 # alice posts to bob
 python chat.py post review --from alice --to bob --title "Schema v0.2" --body-file msg.md
 
-# bob reads what's new for him (only messages addressed to him or the group)
+# bob reads what's new for him
 python chat.py read review --as bob
 
-# alice waits for bob's reply — burns 0 tokens while blocked
-python chat.py wait review --as alice --timeout 900
+# create dependent work
+python chat.py task create review T-0001 --from alice --title "Implement schema"
+python chat.py task create review T-0002 --from alice --title "Review schema" --depends-on T-0001
+
+# claim, renew and complete a ready task
+python chat.py task claim review T-0001 --as alice --lease-seconds 900
+python chat.py task renew review T-0001 --as alice --lease-seconds 900
+python chat.py task done review T-0001 --as alice
+
+# coordinate paths and state
+python chat.py lock review src/schema.py --as alice --lease-seconds 900
+python chat.py state review
+python chat.py compact review --as alice
+
+# capability handshake without claiming host-native execution
+python chat.py event post review --from alice --type capability --harness generic-shell
 ```
 
 Root defaults to `~/agent-chat`; override with `$AGENT_CHAT_ROOT` or `--root`. Run
@@ -91,36 +105,43 @@ Root defaults to `~/agent-chat`; override with `$AGENT_CHAT_ROOT` or `--root`. R
 
 ## How it works
 
-- **Channels** — one folder per group chat; make as many as you need (`init`).
-- **Messages** — `NNNN-<from>-<slug>.md` with frontmatter (`from`, `to`, `reply_to`,
-  `status`, `title`). `to: all` broadcasts.
-- **Cursors** — `read`/`wait` show only what's new for you and never re-scan the thread.
-- **Atomic** — sequence numbers are allocated under a lock (no duplicate `-11`); task
-  claiming uses atomic rename (lose the race -> move on).
+- **Channels** — one folder per group chat; make as many as needed with `init`.
+- **Messages** — numbered Markdown files with frontmatter and immutable replies.
+- **Cursors** — `read`/`wait` show only new relevant messages.
+- **Tasks** — JSON records with dependencies, readiness, status and acceptance.
+- **Leases** — owner-bound claims with expiry and explicit stale recovery.
+- **Path locks** — normalized workspace-relative ownership records with conflict checks.
+- **State** — deterministic derived `state.md`; compaction never replaces source records.
+- **Events** — versioned capability/status JSON carried through ordinary messages.
+- **Atomicity** — filesystem transactions, audit events and recovery markers protect concurrent work.
 
-Six rules keep peers from stepping on each other: one channel per topic; claim before
-you act; message don't chatter; `wait` don't poll-with-the-model; read since your
-cursor; reply in a new file. Full protocol in `SPEC.md`.
+Agent Chat is a coordination data layer. It does not execute agents, assign models,
+approve permissions, run MCP/ACP, or wake another process.
 
 ## Two modes, two budgets
 
-- **Live swarm** — N sessions running concurrently, `wait`-ing on each other. Buys
-  wall-clock parallelism + fault tolerance; costs more tokens. For abundant budgets.
-- **Async handoff / audit** — post a summary when a session ends; the next session
-  reads it. Nearly free — usable on a tight budget.
+- **Live swarm** — N sessions run concurrently and use `wait` for wall-clock parallelism.
+- **Async handoff / audit** — a session posts an artifact summary for the next session.
+
+Both modes use the same file-backed protocol and remain auditable.
 
 ## Install & distribution
 
 - **As a CLI** — `pipx install agent-chat-plugin` then run `agent-chat`
   (or `uvx --from agent-chat-plugin agent-chat`).
-- **As a skill** — drop `SKILL.md` + `chat.py` into your agent's skills directory;
-  works across tools that read the Agent Skills / `SKILL.md` standard.
-- **As a Claude Code plugin** — via a plugin marketplace.
+- **As a Skill** — copy `SKILL.md` and `chat.py` into a compatible Skills directory.
+- **As a Claude Code plugin** — install from the marketplace package.
+
+The CLI/Skill protocol is portable. A portable protocol claim is not a first-class
+native integration claim for a specific host; verify each host's manifest, hooks and
+domain call separately.
 
 ## Status
 
-Early (v0). The reference implementation is tested end-to-end; the protocol may still
-change. Feedback and interop with `tap` / `TICK.md` welcome.
+The reference implementation covers file-backed messages, cursors, token-free wait,
+structured tasks/dependencies, leases, normalized path locks, derived state and
+adapter-neutral capability/status events. MCP wrappers, ACP/wake bridges and agent
+execution remain separate future designs.
 
 ## License
 

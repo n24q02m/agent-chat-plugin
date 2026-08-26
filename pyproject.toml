@@ -22,13 +22,14 @@ classifiers = [
 Homepage = "https://github.com/n24q02m/agent-chat-plugin"
 Specification = "https://github.com/n24q02m/agent-chat-plugin/blob/main/SPEC.md"
 
-# The CLI is a single stdlib module (chat.py). No runtime dependencies.
-# Distribution name is agent-chat-plugin; the installed command stays `agent-chat`.
+# The CLI entry point stays in chat.py; agent_chat/ ships the structured
+# coordination modules used by the installed command.
 [project.scripts]
 agent-chat = "chat:main"
 
 [tool.setuptools]
 py-modules = ["chat"]
+packages = ["agent_chat"]
 
 [tool.semantic_release]
 tag_format = "v{version}"

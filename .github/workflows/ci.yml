@@ -23,6 +23,10 @@ jobs:
       # change (0.16.0 did exactly that), and CI disagrees with the local hook.
       - run: pip install ruff==0.15.7
       - run: ruff check .
+      - name: install project package
+        run: python -m pip install .
+      - name: protocol and state tests
+        run: python -m unittest discover -s tests -p "test_*.py" -v
       - name: byte-compile
         run: python -m py_compile chat.py hooks/session_inbox.py
       - name: smoke test CLI
