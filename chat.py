@@ -255,8 +255,19 @@ def _seq_from_name(name: str) -> int | None:
     return int(m.group(1)) if m else None
 
 
+def _scan_md(chan: Path):
+    """Yields DirEntry objects for all .md files in the channel directory.
+    Avoids Path object allocation overhead of glob('*.md')."""
+    try:
+        for entry in os.scandir(chan):
+            if entry.name.endswith(".md") and entry.is_file():
+                yield entry
+    except OSError:
+        pass
+
+
 def message_files(chan: Path):
-    files = [p for p in chan.glob("*.md") if _seq_from_name(p.name) is not None]
+    files = [chan / p.name for p in _scan_md(chan) if _seq_from_name(p.name) is not None]
     return sorted(files, key=lambda p: _seq_from_name(p.name))
 
 
@@ -346,7 +357,7 @@ def _release_lock(lock: Path):
 
 def _next_seq(chan: Path) -> int:
     mx = 0
-    for p in chan.glob("*.md"):
+    for p in _scan_md(chan):
         s = _seq_from_name(p.name)
         if s is not None:
             mx = max(mx, s)
@@ -376,7 +387,7 @@ def write_cursor(chan: Path, agent: str, seq: int):
 
 def max_seq(chan: Path) -> int:
     maximum = 0
-    for path in chan.glob("*.md"):
+    for path in _scan_md(chan):
         seq = _seq_from_name(path.name)
         if seq is not None and seq > maximum:
             maximum = seq
@@ -424,13 +435,13 @@ def cmd_channels(root: Path, a):
         count = 0
         last_path = None
         last_seq = 0
-        for path in chan.glob("*.md"):
-            seq = _seq_from_name(path.name)
+        for entry in _scan_md(chan):
+            seq = _seq_from_name(entry.name)
             if seq is None:
                 continue
             count += 1
             if last_path is None or seq > last_seq:
-                last_path = path
+                last_path = chan / entry.name
                 last_seq = seq
         last = "-"
         if last_path is not None:
@@ -464,7 +475,7 @@ def cmd_roster(root: Path, a):
     print(f"channel : {meta.get('channel')}")
     print(f"topic   : {meta.get('topic') or '(none)'}")
     print(f"members : {', '.join(meta.get('members', [])) or '(open)'}")
-    count = sum(1 for p in d.glob("*.md") if _seq_from_name(p.name) is not None)
+    count = sum(1 for p in _scan_md(d) if _seq_from_name(p.name) is not None)
     print(f"messages: {count}")
 
 
@@ -539,14 +550,14 @@ def cmd_read(root: Path, a):
     # avoiding O(N log N) message_files sort and redundant max_seq glob.
     found = []
     top = 0
-    for p in d.glob("*.md"):
-        seq = _seq_from_name(p.name)
+    for entry in _scan_md(d):
+        seq = _seq_from_name(entry.name)
         if seq is None:
             continue
         if seq > top:
             top = seq
         if seq > cur:
-            found.append((seq, p))
+            found.append((seq, d / entry.name))
 
     found.sort(key=lambda x: x[0])
 
@@ -610,13 +621,13 @@ def cmd_peek(root: Path, a):
     # Optimization: Use a min-heap to find top N messages in O(N log K) time
     # rather than sorting all messages O(N log N) via message_files()
     top_n = []
-    for p in d.glob("*.md"):
-        seq = _seq_from_name(p.name)
+    for entry in _scan_md(d):
+        seq = _seq_from_name(entry.name)
         if seq is not None:
             if len(top_n) < a.n:
-                heapq.heappush(top_n, (seq, p))
+                heapq.heappush(top_n, (seq, d / entry.name))
             elif seq > top_n[0][0]:
-                heapq.heapreplace(top_n, (seq, p))
+                heapq.heapreplace(top_n, (seq, d / entry.name))
 
     # Extract in ascending order (heappop gets the smallest first)
     files = [heapq.heappop(top_n)[1] for _ in range(len(top_n))]

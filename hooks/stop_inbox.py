@@ -43,11 +43,11 @@ def main() -> None:
 
             cursor = chat.read_cursor(channel_path, name)
             unread = 0
-            for message in channel_path.glob("*.md"):
+            for message in chat._scan_md(channel_path):
                 sequence = chat._seq_from_name(message.name)
                 if sequence is None or sequence <= cursor:
                     continue
-                if chat.is_relevant(chat.parse_frontmatter(message), name):
+                if chat.is_relevant(chat.parse_frontmatter(channel_path / message.name), name):
                     unread += 1
             if unread:
                 unread_by_channel.append((channel, unread))
