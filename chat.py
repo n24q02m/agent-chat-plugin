@@ -1080,7 +1080,7 @@ def build_parser() -> argparse.ArgumentParser:
 
 
     s = sub.add_parser("init", help="create a channel")
-    s.add_argument("channel")
+    s.add_argument("channel", help="target channel name")
     s.add_argument("--members", help="comma-separated agent names")
     s.add_argument("--topic")
     s.set_defaults(func=cmd_init)
@@ -1089,13 +1089,13 @@ def build_parser() -> argparse.ArgumentParser:
     s.set_defaults(func=cmd_channels)
 
     s = sub.add_parser("roster", help="show a channel's members")
-    s.add_argument("channel")
+    s.add_argument("channel", help="target channel name")
     s.set_defaults(func=cmd_roster)
 
     s = sub.add_parser(
         "post", help="post a message (body via --body/--body-file/stdin)"
     )
-    s.add_argument("channel")
+    s.add_argument("channel", help="target channel name")
     s.add_argument("--from", dest="sender", required=True)
     s.add_argument("--to", help="recipient agent, or 'all' (default all)")
     s.add_argument("--title", required=True)
@@ -1108,7 +1108,7 @@ def build_parser() -> argparse.ArgumentParser:
     event = sub.add_parser("event", help="post/read adapter-neutral events")
     event_sub = event.add_subparsers(dest="event_cmd", required=True)
     s = event_sub.add_parser("post", help="post a capability or status event")
-    s.add_argument("channel")
+    s.add_argument("channel", help="target channel name")
     s.add_argument("--from", dest="sender", required=True)
     s.add_argument("--type", dest="event_type", choices=EVENT_TYPES, required=True)
     s.add_argument("--harness", required=True)
@@ -1117,12 +1117,12 @@ def build_parser() -> argparse.ArgumentParser:
     s.add_argument("--primitives", action="append")
     s.set_defaults(func=cmd_event_post)
     s = event_sub.add_parser("read", help="read validated adapter-neutral events")
-    s.add_argument("channel")
+    s.add_argument("channel", help="target channel name")
     s.add_argument("--type", dest="event_type", choices=EVENT_TYPES)
     s.set_defaults(func=cmd_event_read)
 
     s = sub.add_parser("read", help="print new messages for an agent (advances cursor)")
-    s.add_argument("channel")
+    s.add_argument("channel", help="target channel name")
     s.add_argument("--as", dest="agent", required=True)
     s.add_argument(
         "--all", action="store_true", help="show entire thread, ignore relevance"
@@ -1133,44 +1133,44 @@ def build_parser() -> argparse.ArgumentParser:
     s = sub.add_parser(
         "wait", help="block (sleep-poll, 0 tokens) until a reply arrives"
     )
-    s.add_argument("channel")
+    s.add_argument("channel", help="target channel name")
     s.add_argument("--as", dest="agent", required=True)
     s.add_argument("--timeout", type=float, default=900.0)
     s.add_argument("--interval", type=float, default=5.0)
     s.set_defaults(func=cmd_wait)
 
     s = sub.add_parser("peek", help="show last N messages without touching the cursor")
-    s.add_argument("channel")
+    s.add_argument("channel", help="target channel name")
     s.add_argument("-n", type=int, default=3)
     s.set_defaults(func=cmd_peek)
 
     s = sub.add_parser("claim", help="atomically claim a task-<id>.md marker")
-    s.add_argument("channel")
+    s.add_argument("channel", help="target channel name")
     s.add_argument("task", help="task marker filename, e.g. task-12.md")
     s.add_argument("--as", dest="agent", required=True)
     s.set_defaults(func=cmd_claim)
 
     s = sub.add_parser("lock", help="lock workspace-relative paths")
-    s.add_argument("channel")
-    s.add_argument("paths", nargs="+")
+    s.add_argument("channel", help="target channel name")
+    s.add_argument("paths", nargs="+", help="one or more workspace-relative file paths")
     s.add_argument("--as", "--from", "--owner", dest="owner", required=True)
     s.add_argument("--lease-seconds", "--lease", "--ttl", type=float, default=300.0)
     s.set_defaults(func=cmd_lock)
 
     s = sub.add_parser("check", help="check workspace-relative paths for conflicts")
-    s.add_argument("channel")
-    s.add_argument("paths", nargs="+")
+    s.add_argument("channel", help="target channel name")
+    s.add_argument("paths", nargs="+", help="one or more workspace-relative file paths")
     s.add_argument("--as", "--from", "--owner", dest="owner")
     s.set_defaults(func=cmd_check)
 
     s = sub.add_parser("unlock", help="release an owned path lock")
-    s.add_argument("channel")
+    s.add_argument("channel", help="target channel name")
     s.add_argument("target", help="lock id or exact normalized path")
     s.add_argument("--as", "--from", "--owner", dest="owner", required=True)
     s.set_defaults(func=cmd_unlock)
 
     s = sub.add_parser("recover", help="recover an expired path lock explicitly")
-    s.add_argument("channel")
+    s.add_argument("channel", help="target channel name")
     s.add_argument("target", help="lock id or exact normalized path")
     s.add_argument("--as", "--from", "--owner", dest="owner", required=True)
     s.add_argument("--reason", required=True)
@@ -1180,7 +1180,7 @@ def build_parser() -> argparse.ArgumentParser:
         "recover-pending",
         help="recover a pending crashed path-lock transaction",
     )
-    s.add_argument("channel")
+    s.add_argument("channel", help="target channel name")
     s.add_argument("--as", "--from", "--owner", dest="actor", required=True)
     s.add_argument(
         "--resolve-publication",
@@ -1190,7 +1190,7 @@ def build_parser() -> argparse.ArgumentParser:
     s.set_defaults(func=cmd_path_recover_pending)
 
     s = sub.add_parser("state", help="render or show channel state summary")
-    s.add_argument("channel")
+    s.add_argument("channel", help="target channel name")
     s.add_argument("--as", "--from", "--actor", dest="actor", help="agent identity")
     s.add_argument("--write", "--save", action="store_true", help="write state.md to channel")
     s.add_argument("--no-audit", action="store_true", help="skip posting audit message on write")
@@ -1199,7 +1199,7 @@ def build_parser() -> argparse.ArgumentParser:
     s.set_defaults(func=cmd_state)
 
     s = sub.add_parser("compact", help="compact channel state into state.md")
-    s.add_argument("channel")
+    s.add_argument("channel", help="target channel name")
     s.add_argument("--as", "--from", "--actor", dest="actor", help="agent identity")
     s.add_argument("--no-audit", action="store_true", help="do not post audit event to channel")
     s.add_argument("--json", action="store_true", help="output structured JSON summary")
@@ -1218,8 +1218,8 @@ def build_parser() -> argparse.ArgumentParser:
     task.error = _TaskArgumentParser.error.__get__(task, _TaskArgumentParser)
 
     s = task_sub.add_parser("create", help="create a task record")
-    s.add_argument("channel")
-    s.add_argument("task_id")
+    s.add_argument("channel", help="target channel name")
+    s.add_argument("task_id", help="task identifier")
     s.add_argument("--from", "--created-by", dest="creator", required=True)
     s.add_argument("--title", required=True)
     s.add_argument("--owner")
@@ -1230,17 +1230,17 @@ def build_parser() -> argparse.ArgumentParser:
     s.set_defaults(func=cmd_task_create)
 
     s = task_sub.add_parser("list", help="list task records")
-    s.add_argument("channel")
+    s.add_argument("channel", help="target channel name")
     s.set_defaults(func=cmd_task_list)
 
     s = task_sub.add_parser("show", help="show one task record")
-    s.add_argument("channel")
-    s.add_argument("task_id")
+    s.add_argument("channel", help="target channel name")
+    s.add_argument("task_id", help="task identifier")
     s.set_defaults(func=cmd_task_show)
 
     s = task_sub.add_parser("update", help="update task fields")
-    s.add_argument("channel")
-    s.add_argument("task_id")
+    s.add_argument("channel", help="target channel name")
+    s.add_argument("task_id", help="task identifier")
     s.add_argument("--as", "--from", dest="actor", required=True)
     s.add_argument("--title", default=argparse.SUPPRESS)
     s.add_argument("--owner", default=argparse.SUPPRESS)
@@ -1255,22 +1255,22 @@ def build_parser() -> argparse.ArgumentParser:
     s.set_defaults(func=cmd_task_update)
 
     s = task_sub.add_parser("claim", help="claim a ready task with a lease")
-    s.add_argument("channel")
-    s.add_argument("task_id")
+    s.add_argument("channel", help="target channel name")
+    s.add_argument("task_id", help="task identifier")
     s.add_argument("--as", "--from", dest="actor", required=True)
     s.add_argument("--lease-seconds", "--lease", "--ttl", type=float, default=300.0)
     s.set_defaults(func=cmd_task_claim)
 
     s = task_sub.add_parser("renew", help="renew an owned task lease")
-    s.add_argument("channel")
-    s.add_argument("task_id")
+    s.add_argument("channel", help="target channel name")
+    s.add_argument("task_id", help="task identifier")
     s.add_argument("--as", "--from", dest="actor", required=True)
     s.add_argument("--lease-seconds", "--lease", "--ttl", type=float, default=300.0)
     s.set_defaults(func=cmd_task_renew)
 
     s = task_sub.add_parser("recover", help="recover an expired task lease")
-    s.add_argument("channel")
-    s.add_argument("task_id")
+    s.add_argument("channel", help="target channel name")
+    s.add_argument("task_id", help="task identifier")
     s.add_argument("--as", "--from", dest="actor", required=True)
     s.add_argument("--reason", required=True)
     s.add_argument("--lease-seconds", "--lease", "--ttl", type=float, default=300.0)
@@ -1280,7 +1280,7 @@ def build_parser() -> argparse.ArgumentParser:
         "recover-pending",
         help="recover a pending crashed lease transaction",
     )
-    s.add_argument("channel")
+    s.add_argument("channel", help="target channel name")
     s.add_argument("--as", "--from", dest="actor", required=True)
     s.add_argument(
         "--resolve-publication",
@@ -1295,8 +1295,8 @@ def build_parser() -> argparse.ArgumentParser:
         ("release", cmd_task_release, "release a task back to open", "released"),
     ):
         s = task_sub.add_parser(command, help=help_text)
-        s.add_argument("channel")
-        s.add_argument("task_id")
+        s.add_argument("channel", help="target channel name")
+        s.add_argument("task_id", help="task identifier")
         s.add_argument("--as", "--from", dest="actor", required=True)
         s.set_defaults(func=handler)
 
