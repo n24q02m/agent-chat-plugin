@@ -1,3 +1,4 @@
+import re
 """Focused Task 2 tests for the typed task model and atomic store."""
 
 import contextlib
@@ -491,7 +492,7 @@ class TaskCommandTests(unittest.TestCase):
         first_list = self.run_cli("task", "list", "review")
         second_list = self.run_cli("task", "list", "review")
         self.assertEqual(first_list, second_list)
-        self.assertIn("T-0001  open  -  -  Document the review flow", first_list[1])
+        self.assertTrue(re.search(r"T-0001\s+open\s+-\s+-\s+Document the review flow", first_list[1]))
 
         code, updated, error = self.run_cli(
             "task",
