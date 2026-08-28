@@ -1,11 +1,11 @@
-import re
 """Focused Task 2 tests for the typed task model and atomic store."""
 
 import contextlib
 import io
 import json
-import threading
+import re
 import tempfile
+import threading
 import unittest
 from pathlib import Path
 from types import SimpleNamespace
