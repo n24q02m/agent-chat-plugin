@@ -17,3 +17,7 @@
 ## 2024-08-14 - os.scandir vs Path.glob in tight loops
 **Learning:** `Path.glob()` instantiates a `Path` object for every matched file, which causes significant CPU and memory overhead when scanning directories with thousands of files.
 **Action:** In polling loops (like `cmd_wait`) or frequent hook executions (like `session_inbox.py`), prefer `os.scandir()` which yields lightweight `DirEntry` objects. Only instantiate `Path` objects for the files that actually pass the filtering logic.
+
+## 2024-11-20 - Avoid Path.glob for shallow directory structural checks
+**Learning:** Using `Path.glob("*/_meta.json")` to discover subdirectories containing a specific file instantiates a large number of internal objects and performs slower path matching compared to a direct filesystem scan.
+**Action:** When finding directories based on the presence of a specific file (e.g., `_meta.json` in a channel folder), use `os.scandir()` combined with `os.path.exists()` to check for the file directly. This avoids unnecessary memory allocations and is significantly faster for workspaces with many directories.

@@ -420,8 +420,24 @@ def cmd_channels(root: Path, a):
         print(f"(no channels yet under {root})")
         return
     rows = []
-    for meta_path in sorted(root.glob("*/_meta.json")):
-        chan = meta_path.parent
+    found_channels = []
+    # Optimization: Use os.scandir instead of Path.glob("*/_meta.json") to discover channels.
+    # This avoids instantiating thousands of Path objects for discarded subdirectories.
+    # Filters out hidden directories (starting with '.') to maintain parity with glob("*").
+    try:
+        with os.scandir(root) as it:
+            for entry in it:
+                if (
+                    not entry.name.startswith(".")
+                    and entry.is_dir()
+                    and os.path.exists(os.path.join(entry.path, "_meta.json"))
+                ):
+                    found_channels.append(entry.name)
+    except OSError:
+        pass
+    for chan_name in sorted(found_channels):
+        chan = root / chan_name
+        meta_path = chan / "_meta.json"
         try:
             meta = json.loads(meta_path.read_text(encoding="utf-8"))
         except (OSError, ValueError):
