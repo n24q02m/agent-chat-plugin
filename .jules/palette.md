@@ -20,3 +20,7 @@
 ## 2024-03-24 - Dynamic CLI Column Alignment for Tasks
 **Learning:** Hardcoded column spacing in text-based CLIs breaks visually when field content like "OWNER" or "DEPENDS_ON" has varying lengths, making it difficult for users to read table output cleanly.
 **Action:** When printing tables to the CLI, calculate the maximum width needed for each column across all rows (including headers), and use `.ljust(width)` to format the text uniformly.
+
+## 2024-05-25 - Self-documenting CLI Interfaces
+**Learning:** For Python CLI applications, providing descriptive `help` text for all `argparse` arguments (both positional and optional) significantly improves usability by making the interface self-documenting via the `--help` flag.
+**Action:** Always add descriptive `help` parameters to all `add_argument` calls in CLI applications, not just the top-level commands.
