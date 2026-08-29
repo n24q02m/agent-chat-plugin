@@ -913,17 +913,22 @@ def cmd_task_create(root: Path, a):
 def cmd_task_list(root: Path, a):
     store = _task_store(root, a.channel)
     tasks = store.list()
-    print("ID  STATUS  OWNER  DEPENDS_ON  TITLE")
     if not tasks:
+        print("ID  STATUS  OWNER  DEPENDS_ON  TITLE")
         print("(no tasks)")
         return
+    rows = []
     for task in tasks:
         owner = task.owner or "-"
         dependencies = ",".join(task.depends_on) or "-"
-        print(
-            f"{task.id}  {task.status}  {owner}  {dependencies}  "
-            f"{task.title}"
-        )
+        rows.append((task.id, task.status, owner, dependencies, task.title))
+    w_id = max(len("ID"), max(len(r[0]) for r in rows))
+    w_status = max(len("STATUS"), max(len(r[1]) for r in rows))
+    w_owner = max(len("OWNER"), max(len(r[2]) for r in rows))
+    w_deps = max(len("DEPENDS_ON"), max(len(r[3]) for r in rows))
+    print(f"{'ID'.ljust(w_id)}  {'STATUS'.ljust(w_status)}  {'OWNER'.ljust(w_owner)}  {'DEPENDS_ON'.ljust(w_deps)}  TITLE")
+    for r_id, r_status, r_owner, r_deps, r_title in rows:
+        print(f"{r_id.ljust(w_id)}  {r_status.ljust(w_status)}  {r_owner.ljust(w_owner)}  {r_deps.ljust(w_deps)}  {r_title}")
 
 
 def cmd_task_show(root: Path, a):
