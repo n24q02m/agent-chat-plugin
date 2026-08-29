@@ -17,3 +17,6 @@
 ## 2024-08-13 - Truncate long strings in CLI tables
 **Learning:** Extremely long member lists can push CLI table columns out of alignment and clutter the output, making it unreadable. Additionally, raw lists formatted without spaces (e.g., `alice,bob,charlie`) are visually dense.
 **Action:** When displaying lists in CLI tables (e.g., in `cmd_channels`), use an ellipsis (`...`) to truncate the string to a reasonable length instead of a hard slice, preventing abrupt cut-offs. Also format lists with `, ` (comma + space) for better readability.
+## 2024-03-24 - Dynamic CLI Column Alignment for Tasks
+**Learning:** Hardcoded column spacing in text-based CLIs breaks visually when field content like "OWNER" or "DEPENDS_ON" has varying lengths, making it difficult for users to read table output cleanly.
+**Action:** When printing tables to the CLI, calculate the maximum width needed for each column across all rows (including headers), and use `.ljust(width)` to format the text uniformly.

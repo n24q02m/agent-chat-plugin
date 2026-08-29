@@ -17,3 +17,7 @@
 **Vulnerability:** The application crashed with raw stack traces when encountering malformed `_meta.json` or invalid UTF-8 bytes in message files, creating a Denial of Service (DoS) and leaking implementation details.
 **Learning:** Always fail securely by catching decoding exceptions like `UnicodeDecodeError` and `json.decoder.JSONDecodeError` (`ValueError`) when parsing external or user-provided files, and wrap them in friendly domain errors.
 **Prevention:** Use `try...except (OSError, ValueError):` when parsing JSON files, and `try...except (OSError, UnicodeDecodeError):` when reading text files with a specific encoding.
+## 2024-10-26 - [Denial of Service via Uncaught UnicodeDecodeError in file reading]
+**Vulnerability:** The application crashed with raw stack traces when reading non-UTF-8 message bodies (`--body-file`) or message files, causing a Denial of Service (DoS) during read operations.
+**Learning:** `Path.read_text(encoding="utf-8")` raises `UnicodeDecodeError` on invalid bytes, which must be caught and handled securely.
+**Prevention:** Wrap `Path.read_text(encoding="utf-8")` calls in `try...except (OSError, UnicodeDecodeError):` blocks to fail gracefully without crashing the application.
