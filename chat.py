@@ -777,12 +777,12 @@ def cmd_compact(root: Path, a):
         print(f"compacted state for {a.channel} -> {a.channel}/state.md (open_tasks={len(summary.open_tasks)}, locks={len(summary.path_locks)}, decisions={len(summary.decisions)})")
 
 def _event_body(path: Path) -> dict:
-    raw = path.read_text(encoding="utf-8")
-    parts = raw.split("---", 2)
-    body = parts[2].strip() if len(parts) >= 3 else ""
     try:
+        raw = path.read_text(encoding="utf-8")
+        parts = raw.split("---", 2)
+        body = parts[2].strip() if len(parts) >= 3 else ""
         return validate_adapter_event(json.loads(body))
-    except (json.JSONDecodeError, UnicodeError) as error:
+    except (json.JSONDecodeError, UnicodeError, OSError) as error:
         raise AdapterEventError("EVENT_MALFORMED_BODY", path.name) from error
 
 
