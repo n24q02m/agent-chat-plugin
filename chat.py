@@ -1118,29 +1118,29 @@ def build_parser() -> argparse.ArgumentParser:
 
 
     s = sub.add_parser("init", help="create a channel")
-    s.add_argument("channel")
+    s.add_argument("channel", help="name of the channel to create")
     s.add_argument("--members", help="comma-separated agent names")
-    s.add_argument("--topic")
+    s.add_argument("--topic", help="initial topic of the channel")
     s.set_defaults(func=cmd_init)
 
     s = sub.add_parser("channels", help="list channels")
     s.set_defaults(func=cmd_channels)
 
     s = sub.add_parser("roster", help="show a channel's members")
-    s.add_argument("channel")
+    s.add_argument("channel", help="channel to inspect")
     s.set_defaults(func=cmd_roster)
 
     s = sub.add_parser(
         "post", help="post a message (body via --body/--body-file/stdin)"
     )
-    s.add_argument("channel")
-    s.add_argument("--from", dest="sender", required=True)
+    s.add_argument("channel", help="channel to post in")
+    s.add_argument("--from", dest="sender", required=True, help="sender agent name")
     s.add_argument("--to", help="recipient agent, or 'all' (default all)")
-    s.add_argument("--title", required=True)
+    s.add_argument("--title", required=True, help="message title")
     s.add_argument("--reply", type=int, help="seq this replies to")
-    s.add_argument("--status", default="discussion")
-    s.add_argument("--body")
-    s.add_argument("--body-file")
+    s.add_argument("--status", default="discussion", help="message status (default: discussion)")
+    s.add_argument("--body", help="literal message body content")
+    s.add_argument("--body-file", help="read message body from file")
     s.set_defaults(func=cmd_post)
 
     event = sub.add_parser("event", help="post/read adapter-neutral events")
@@ -1160,8 +1160,8 @@ def build_parser() -> argparse.ArgumentParser:
     s.set_defaults(func=cmd_event_read)
 
     s = sub.add_parser("read", help="print new messages for an agent (advances cursor)")
-    s.add_argument("channel")
-    s.add_argument("--as", dest="agent", required=True)
+    s.add_argument("channel", help="channel to read from")
+    s.add_argument("--as", dest="agent", required=True, help="agent reading the messages")
     s.add_argument(
         "--all", action="store_true", help="show entire thread, ignore relevance"
     )
@@ -1171,15 +1171,15 @@ def build_parser() -> argparse.ArgumentParser:
     s = sub.add_parser(
         "wait", help="block (sleep-poll, 0 tokens) until a reply arrives"
     )
-    s.add_argument("channel")
-    s.add_argument("--as", dest="agent", required=True)
-    s.add_argument("--timeout", type=float, default=900.0)
-    s.add_argument("--interval", type=float, default=5.0)
+    s.add_argument("channel", help="channel to wait on")
+    s.add_argument("--as", dest="agent", required=True, help="agent waiting for messages")
+    s.add_argument("--timeout", type=float, default=900.0, help="maximum wait time in seconds")
+    s.add_argument("--interval", type=float, default=5.0, help="polling interval in seconds")
     s.set_defaults(func=cmd_wait)
 
     s = sub.add_parser("peek", help="show last N messages without touching the cursor")
-    s.add_argument("channel")
-    s.add_argument("-n", type=int, default=3)
+    s.add_argument("channel", help="channel to peek into")
+    s.add_argument("-n", type=int, default=3, help="number of messages to show")
     s.set_defaults(func=cmd_peek)
 
     s = sub.add_parser("claim", help="atomically claim a task-<id>.md marker")
