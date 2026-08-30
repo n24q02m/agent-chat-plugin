@@ -21,3 +21,8 @@
 **Vulnerability:** The application crashed with raw stack traces when reading non-UTF-8 message bodies (`--body-file`) or message files, causing a Denial of Service (DoS) during read operations.
 **Learning:** `Path.read_text(encoding="utf-8")` raises `UnicodeDecodeError` on invalid bytes, which must be caught and handled securely.
 **Prevention:** Wrap `Path.read_text(encoding="utf-8")` calls in `try...except (OSError, UnicodeDecodeError):` blocks to fail gracefully without crashing the application.
+
+## 2024-12-09 - [Denial of Service via Uncaught UnicodeDecodeError in event parsing]
+**Vulnerability:** The application crashed with a raw stack trace when reading malformed event files containing invalid UTF-8 bytes in `_event_body`, causing a Denial of Service (DoS).
+**Learning:** `Path.read_text(encoding="utf-8")` raises `UnicodeDecodeError` on invalid bytes. When processing files, especially those that might be user-provided or modified by external tools, file reading operations must catch these exceptions.
+**Prevention:** Wrap `Path.read_text(encoding="utf-8")` calls in `try...except (OSError, UnicodeError):` blocks to fail securely and gracefully without crashing the application.
