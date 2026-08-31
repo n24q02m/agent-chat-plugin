@@ -21,3 +21,7 @@
 ## 2024-11-20 - Avoid Path.glob for shallow directory structural checks
 **Learning:** Using `Path.glob("*/_meta.json")` to discover subdirectories containing a specific file instantiates a large number of internal objects and performs slower path matching compared to a direct filesystem scan.
 **Action:** When finding directories based on the presence of a specific file (e.g., `_meta.json` in a channel folder), use `os.scandir()` combined with `os.path.exists()` to check for the file directly. This avoids unnecessary memory allocations and is significantly faster for workspaces with many directories.
+
+## 2024-11-20 - Skipping redundant directory scans in poll loops
+**Learning:** In tight polling loops like `cmd_wait`, scanning the directory using `os.scandir()` on every tick to find new messages becomes a CPU bottleneck for channels with thousands of messages (e.g., dropping from 2.5 million function calls down to 640k function calls in a 3-second wait loop of 10,000 files).
+**Action:** When constantly polling a directory for new files, read the directory's `st_mtime` via `os.stat()` (which updates when files are added or removed) and only perform the full `os.scandir()` scan when the `st_mtime` changes. Wrap the `stat()` call in `try...except OSError` to fail safely if the OS doesn't support it or errors out.

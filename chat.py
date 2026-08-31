@@ -610,24 +610,32 @@ def cmd_wait(root: Path, a):
     d = require_channel(root, a.channel)
     cur = read_cursor(d, a.agent)
     deadline = time.time() + a.timeout
+    last_mtime = 0
     while True:
-        found = []
-        # Optimization: use os.scandir to avoid Path instantiation overhead for
-        # thousands of old messages per tick.
         try:
-            with os.scandir(d) as it:
-                for entry in it:
-                    if not entry.name.endswith(".md"):
-                        continue
-                    seq = _seq_from_name(entry.name)
-                    if seq is None or seq <= cur:
-                        continue
-                    p = Path(entry.path)
-                    meta = parse_frontmatter(p)
-                    if is_relevant(meta, a.agent):
-                        found.append(p)
+            mtime = d.stat().st_mtime
         except OSError:
-            pass
+            mtime = 0
+
+        found = []
+        if mtime == 0 or mtime != last_mtime:
+            last_mtime = mtime
+            # Optimization: use os.scandir to avoid Path instantiation overhead for
+            # thousands of old messages per tick.
+            try:
+                with os.scandir(d) as it:
+                    for entry in it:
+                        if not entry.name.endswith(".md"):
+                            continue
+                        seq = _seq_from_name(entry.name)
+                        if seq is None or seq <= cur:
+                            continue
+                        p = Path(entry.path)
+                        meta = parse_frontmatter(p)
+                        if is_relevant(meta, a.agent):
+                            found.append(p)
+            except OSError:
+                pass
         if found:
             # Sort only the newly found messages
             found.sort(key=lambda p: _seq_from_name(p.name))
