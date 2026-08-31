@@ -25,3 +25,7 @@
 ## 2024-11-20 - Skipping redundant directory scans in poll loops
 **Learning:** In tight polling loops like `cmd_wait`, scanning the directory using `os.scandir()` on every tick to find new messages becomes a CPU bottleneck for channels with thousands of messages (e.g., dropping from 2.5 million function calls down to 640k function calls in a 3-second wait loop of 10,000 files).
 **Action:** When constantly polling a directory for new files, read the directory's `st_mtime` via `os.stat()` (which updates when files are added or removed) and only perform the full `os.scandir()` scan when the `st_mtime` changes. Wrap the `stat()` call in `try...except OSError` to fail safely if the OS doesn't support it or errors out.
+
+## 2024-05-15 - Refactoring Path.glob() to os.scandir()
+**Learning:** `Path.glob()` instantiates a `Path` object for every matched file, causing significant overhead in loops when filtering files (like matching sequences and evaluating applicability). Replacing it with `os.scandir()` prevents unnecessary instantiation of Path objects for all files since `DirEntry` provides lightweight access to file names and attributes. Wrapping it in a `try...except OSError: pass` block is required, since `os.scandir()` raises an exception if the directory does not exist, unlike `Path.glob()` which yields an empty generator safely.
+**Action:** Always prefer `os.scandir()` combined with `try...except OSError` over `Path.glob()` for polling loops and frequent executions to improve speed while maintaining fault tolerance.
