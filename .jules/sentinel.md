@@ -26,3 +26,8 @@
 **Vulnerability:** The application crashed with a raw stack trace when reading malformed event files containing invalid UTF-8 bytes in `_event_body`, causing a Denial of Service (DoS).
 **Learning:** `Path.read_text(encoding="utf-8")` raises `UnicodeDecodeError` on invalid bytes. When processing files, especially those that might be user-provided or modified by external tools, file reading operations must catch these exceptions.
 **Prevention:** Wrap `Path.read_text(encoding="utf-8")` calls in `try...except (OSError, UnicodeError):` blocks to fail securely and gracefully without crashing the application.
+
+## 2026-08-31 - [Denial of Service via Uncaught UnicodeError in stdin reading]
+**Vulnerability:** The application crashed with a raw stack trace when reading malformed UTF-8 bytes from stdin via `sys.stdin.read()`, causing a Denial of Service (DoS). The bytes were often converted to surrogate escapes which later caused `UnicodeEncodeError` when writing.
+**Learning:** `sys.stdin.read()` may not immediately fail on invalid UTF-8 depending on environment settings (e.g., using `surrogateescape`). These invalid strings can propagate and crash the application during later file writes. We must strictly force UTF-8 validation at the input boundary.
+**Prevention:** Force encoding of the read string via `data.encode("utf-8")` immediately after reading from `sys.stdin` and wrap it in a `try...except (OSError, UnicodeError):` block to fail securely.

@@ -516,7 +516,13 @@ def _read_body(a) -> str:
             "agent-chat: Enter message body; press Ctrl-D (or Ctrl-Z and Enter on Windows) to finish.",
             file=sys.stderr,
         )
-    data = sys.stdin.read()
+    try:
+        data = sys.stdin.read()
+        # Force encoding to catch surrogates immediately
+        data.encode("utf-8")
+    except (OSError, UnicodeError) as e:
+        raise AgentChatError(f"could not read body from stdin: {e}")
+
     if not data.strip():
         raise AgentChatError("empty body (pass --body, --body-file, or pipe via stdin)")
     return data
