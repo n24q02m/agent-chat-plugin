@@ -16,11 +16,12 @@ SESSION_INBOX_HOOK = REPOSITORY_ROOT / "hooks" / "session_inbox.py"
 
 
 def _run_hook_copy(hook_path, **environment):
-    """Run a copy of a hook from a directory with no chat.py beside it."""
+    """Run a hook copy whose directory chain holds no chat.py."""
     with tempfile.TemporaryDirectory() as bare_dir:
-        bare_path = Path(bare_dir)
+        bare_hooks = Path(bare_dir) / "hooks"
+        bare_hooks.mkdir()
         for name in (hook_path.name, "session_inbox.py"):
-            (bare_path / name).write_text(
+            (bare_hooks / name).write_text(
                 (REPOSITORY_ROOT / "hooks" / name).read_text(encoding="utf-8"),
                 encoding="utf-8",
             )
@@ -34,7 +35,7 @@ def _run_hook_copy(hook_path, **environment):
             env.pop(env_name, None)
         env.update(environment)
         return subprocess.run(
-            [sys.executable, str(bare_path / hook_path.name)],
+            [sys.executable, str(bare_hooks / hook_path.name)],
             capture_output=True,
             check=False,
             encoding="utf-8",

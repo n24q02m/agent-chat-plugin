@@ -52,16 +52,18 @@ def main() -> None:
     plugin_root = os.environ.get("CLAUDE_PLUGIN_ROOT", "").strip()
     if not plugin_root:
         plugin_root = str(Path(__file__).resolve().parent.parent)
+    if not (Path(plugin_root) / "chat.py").is_file():
+        # Skip-not-crash: a hook must never fail a harness session.
+        print(
+            "[agent-chat] skipping inbox check: plugin root unresolved "
+            f"(no chat.py under {plugin_root}); hook is non-blocking",
+            file=sys.stderr,
+        )
+        return
     sys.path.insert(0, plugin_root)
     try:
         import chat
     except Exception:
-        # Skip-not-crash: a hook must never fail a harness session.
-        print(
-            "[agent-chat] skipping inbox check: plugin root unresolved "
-            "(chat.py not importable); hook is non-blocking",
-            file=sys.stderr,
-        )
         return
 
     try:

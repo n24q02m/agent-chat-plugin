@@ -20,17 +20,19 @@ def main() -> None:
         # Fallback for harnesses that don't set CLAUDE_PLUGIN_ROOT: this
         # script's own directory chain (hooks/ lives under the plugin root).
         plugin_root = str(Path(__file__).resolve().parent.parent)
+    if not (Path(plugin_root) / "chat.py").is_file():
+        # Skip-not-crash: a hook must never fail a harness session.
+        print(
+            "[agent-chat] skipping inbox check: plugin root unresolved "
+            f"(no chat.py under {plugin_root}); hook is non-blocking",
+            file=sys.stderr,
+        )
+        return
     sys.path.insert(0, plugin_root)
     try:
         import chat
         from session_inbox import _channels_to_check
     except Exception:
-        # Skip-not-crash: a hook must never fail a harness session.
-        print(
-            "[agent-chat] skipping inbox check: plugin root unresolved "
-            "(chat.py not importable); hook is non-blocking",
-            file=sys.stderr,
-        )
         return
 
     try:
