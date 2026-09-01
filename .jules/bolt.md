@@ -25,3 +25,7 @@
 ## 2024-11-20 - Skipping redundant directory scans in poll loops
 **Learning:** In tight polling loops like `cmd_wait`, scanning the directory using `os.scandir()` on every tick to find new messages becomes a CPU bottleneck for channels with thousands of messages (e.g., dropping from 2.5 million function calls down to 640k function calls in a 3-second wait loop of 10,000 files).
 **Action:** When constantly polling a directory for new files, read the directory's `st_mtime` via `os.stat()` (which updates when files are added or removed) and only perform the full `os.scandir()` scan when the `st_mtime` changes. Wrap the `stat()` call in `try...except OSError` to fail safely if the OS doesn't support it or errors out.
+
+## 2024-11-20 - String Methods vs Regex in Polling Loops
+**Learning:** Using `re.match` to parse sequence numbers from filenames inside tight polling loops (like `max_seq` and `message_files`) introduces significant regex overhead when scanning thousands of files per tick. Native string methods like `.split('-', 1)` are much faster for simple patterns.
+**Action:** For simple string parsing in tight loops (e.g., extracting sequence numbers from filenames), prefer using native string methods like `str.split()` and `.isdigit()` over regular expressions (`re.match`), as they are significantly faster and reduce CPU overhead.
