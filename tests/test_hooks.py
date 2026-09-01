@@ -15,6 +15,33 @@ STOP_INBOX_HOOK = REPOSITORY_ROOT / "hooks" / "stop_inbox.py"
 SESSION_INBOX_HOOK = REPOSITORY_ROOT / "hooks" / "session_inbox.py"
 
 
+def _run_hook_copy(hook_path, **environment):
+    """Run a copy of a hook from a directory with no chat.py beside it."""
+    with tempfile.TemporaryDirectory() as bare_dir:
+        bare_path = Path(bare_dir)
+        for name in (hook_path.name, "session_inbox.py"):
+            (bare_path / name).write_text(
+                (REPOSITORY_ROOT / "hooks" / name).read_text(encoding="utf-8"),
+                encoding="utf-8",
+            )
+        env = os.environ.copy()
+        for env_name in (
+            "AGENT_CHAT_NAME",
+            "AGENT_CHAT_ROOT",
+            "AGENT_CHAT_CHANNELS",
+            "CLAUDE_PLUGIN_ROOT",
+        ):
+            env.pop(env_name, None)
+        env.update(environment)
+        return subprocess.run(
+            [sys.executable, str(bare_path / hook_path.name)],
+            capture_output=True,
+            check=False,
+            encoding="utf-8",
+            env=env,
+        )
+
+
 class PromptInboxHookTests(unittest.TestCase):
     HOOK = PROMPT_INBOX_HOOK
 
@@ -49,7 +76,12 @@ class PromptInboxHookTests(unittest.TestCase):
 
     def _run_hook(self, **environment):
         env = os.environ.copy()
-        for name in ("AGENT_CHAT_NAME", "AGENT_CHAT_ROOT", "AGENT_CHAT_CHANNELS"):
+        for name in (
+            "AGENT_CHAT_NAME",
+            "AGENT_CHAT_ROOT",
+            "AGENT_CHAT_CHANNELS",
+            "CLAUDE_PLUGIN_ROOT",
+        ):
             env.pop(name, None)
         env.update(environment)
         return subprocess.run(
@@ -134,6 +166,47 @@ class PromptInboxHookTests(unittest.TestCase):
         self.assertEqual(result.stdout, "")
         self.assertEqual(result.stderr, "")
 
+    def test_claude_plugin_root_env_overrides_the_directory_chain(self):
+        """CLAUDE_PLUGIN_ROOT must win over an unresolvable script location."""
+        result = _run_hook_copy(
+            self.HOOK,
+            AGENT_CHAT_NAME="alice",
+            AGENT_CHAT_ROOT=str(self.root / "missing"),
+            CLAUDE_PLUGIN_ROOT=str(REPOSITORY_ROOT),
+        )
+
+        self.assertEqual(result.returncode, 0)
+        self.assertEqual(result.stdout, "")
+        self.assertEqual(result.stderr, "")
+
+    def test_skips_with_one_line_stderr_note_when_no_root_resolves(self):
+        """Without chat.py reachable, the hook exits 0 with one stderr line."""
+        result = _run_hook_copy(
+            self.HOOK,
+            AGENT_CHAT_NAME="alice",
+            AGENT_CHAT_ROOT=str(self.root),
+        )
+
+        self.assertEqual(result.returncode, 0)
+        self.assertEqual(result.stdout, "")
+        note_lines = result.stderr.strip().splitlines()
+        self.assertEqual(len(note_lines), 1)
+        self.assertIn("[agent-chat]", note_lines[0])
+
+    def test_unresolvable_plugin_root_env_exits_zero_with_a_note(self):
+        """A broken CLAUDE_PLUGIN_ROOT must skip, never crash the session."""
+        result = self._run_hook(
+            AGENT_CHAT_NAME="alice",
+            AGENT_CHAT_ROOT=str(self.root),
+            CLAUDE_PLUGIN_ROOT=str(self.root / "nowhere"),
+        )
+
+        self.assertEqual(result.returncode, 0)
+        self.assertEqual(result.stdout, "")
+        note_lines = result.stderr.strip().splitlines()
+        self.assertEqual(len(note_lines), 1)
+        self.assertIn("[agent-chat]", note_lines[0])
+
 
 class StopInboxHookTests(PromptInboxHookTests):
     HOOK = STOP_INBOX_HOOK
@@ -185,7 +258,12 @@ class SessionInboxHookTests(unittest.TestCase):
 
     def _run_hook(self, **environment):
         env = os.environ.copy()
-        for name in ("AGENT_CHAT_NAME", "AGENT_CHAT_ROOT", "AGENT_CHAT_CHANNELS"):
+        for name in (
+            "AGENT_CHAT_NAME",
+            "AGENT_CHAT_ROOT",
+            "AGENT_CHAT_CHANNELS",
+            "CLAUDE_PLUGIN_ROOT",
+        ):
             env.pop(name, None)
         env.update(environment)
         return subprocess.run(
@@ -231,6 +309,47 @@ class SessionInboxHookTests(unittest.TestCase):
             "Run /agent-chat to read/reply.\n",
         )
         self.assertEqual(result.stderr, "")
+
+    def test_claude_plugin_root_env_overrides_the_directory_chain(self):
+        """CLAUDE_PLUGIN_ROOT must win over an unresolvable script location."""
+        result = _run_hook_copy(
+            SESSION_INBOX_HOOK,
+            AGENT_CHAT_NAME="alice",
+            AGENT_CHAT_ROOT=str(self.root / "missing"),
+            CLAUDE_PLUGIN_ROOT=str(REPOSITORY_ROOT),
+        )
+
+        self.assertEqual(result.returncode, 0)
+        self.assertEqual(result.stdout, "")
+        self.assertEqual(result.stderr, "")
+
+    def test_skips_with_one_line_stderr_note_when_no_root_resolves(self):
+        """Without chat.py reachable, the hook exits 0 with one stderr line."""
+        result = _run_hook_copy(
+            SESSION_INBOX_HOOK,
+            AGENT_CHAT_NAME="alice",
+            AGENT_CHAT_ROOT=str(self.root),
+        )
+
+        self.assertEqual(result.returncode, 0)
+        self.assertEqual(result.stdout, "")
+        note_lines = result.stderr.strip().splitlines()
+        self.assertEqual(len(note_lines), 1)
+        self.assertIn("[agent-chat]", note_lines[0])
+
+    def test_unresolvable_plugin_root_env_exits_zero_with_a_note(self):
+        """A broken CLAUDE_PLUGIN_ROOT must skip, never crash the session."""
+        result = self._run_hook(
+            AGENT_CHAT_NAME="alice",
+            AGENT_CHAT_ROOT=str(self.root),
+            CLAUDE_PLUGIN_ROOT=str(self.root / "nowhere"),
+        )
+
+        self.assertEqual(result.returncode, 0)
+        self.assertEqual(result.stdout, "")
+        note_lines = result.stderr.strip().splitlines()
+        self.assertEqual(len(note_lines), 1)
+        self.assertIn("[agent-chat]", note_lines[0])
 
 
 if __name__ == "__main__":
