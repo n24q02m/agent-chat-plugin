@@ -517,6 +517,10 @@ def _read_body(a) -> str:
             file=sys.stderr,
         )
     data = sys.stdin.read()
+    try:
+        data.encode("utf-8")
+    except UnicodeError as error:
+        raise AgentChatError(f"stdin contains invalid utf-8 bytes: {error}") from error
     if not data.strip():
         raise AgentChatError("empty body (pass --body, --body-file, or pipe via stdin)")
     return data
