@@ -3,7 +3,10 @@
 import contextlib
 import io
 import json
+import multiprocessing
+import os
 import re
+import subprocess
 import tempfile
 import threading
 import unittest
@@ -24,6 +27,39 @@ from agent_chat.task_store import TaskStore
 TIMESTAMP = "2026-08-21T12:00:00+00:00"
 
 
+def _hold_task_lock(channel: str, root: str, ready, release) -> None:
+    store = TaskStore(Path(channel), root=Path(root))
+    handle = store._acquire_mutation_lock(timeout=2.0)
+    ready.send("acquired")
+    release.wait(5.0)
+    store._release_mutation_lock(handle)
+
+
+def _exit_with_task_lock(channel: str, root: str, ready) -> None:
+    store = TaskStore(Path(channel), root=Path(root))
+    store._acquire_mutation_lock(timeout=2.0)
+    ready.send("acquired")
+    ready.close()
+    # Return without application-level release; process exit owns cleanup.
+
+
+def _cleanup_process(process, *, release=None):
+    if release is not None:
+        release.set()
+    process.join(5.0)
+    if process.is_alive():
+        process.terminate()
+        process.join(5.0)
+    if process.is_alive():
+        process.kill()
+        process.join(5.0)
+    if process.is_alive():
+        raise RuntimeError("spawned task-lock worker did not stop")
+    exitcode = process.exitcode
+    process.close()
+    return exitcode
+
+
 class TaskStoreTests(unittest.TestCase):
     def setUp(self):
         self.temp_dir = tempfile.TemporaryDirectory()
@@ -34,6 +70,131 @@ class TaskStoreTests(unittest.TestCase):
         )
         self.channel = self.root / "review"
         self.store = TaskStore(self.channel)
+
+    def test_live_task_lock_is_not_reclaimed_from_mtime(self):
+        ctx = multiprocessing.get_context("spawn")
+        parent, child = ctx.Pipe(duplex=False)
+        release = ctx.Event()
+        process = ctx.Process(
+            target=_hold_task_lock,
+            args=(str(self.channel), str(self.root), child, release),
+        )
+        process.start()
+        child.close()
+        try:
+            self.assertTrue(
+                parent.poll(5.0),
+                "task lock worker did not signal acquisition",
+            )
+            self.assertEqual(parent.recv(), "acquired")
+            os.utime(self.channel / "_tasks.lock", (0, 0))
+            with self.assertRaises(TaskValidationError) as error:
+                self.store._acquire_mutation_lock(timeout=0.05)
+            self.assertEqual(error.exception.code, "TASK_LOCK_TIMEOUT")
+        finally:
+            try:
+                exitcode = _cleanup_process(process, release=release)
+            finally:
+                parent.close()
+        self.assertEqual(exitcode, 0)
+
+    def test_task_lock_recovers_after_owner_process_exits(self):
+        ctx = multiprocessing.get_context("spawn")
+        parent, child = ctx.Pipe(duplex=False)
+        process = ctx.Process(
+            target=_exit_with_task_lock,
+            args=(str(self.channel), str(self.root), child),
+        )
+        process.start()
+        child.close()
+        try:
+            self.assertTrue(
+                parent.poll(5.0),
+                "task lock owner did not signal acquisition",
+            )
+            self.assertEqual(parent.recv(), "acquired")
+            process.join(5.0)
+            self.assertFalse(process.is_alive())
+            self.assertEqual(process.exitcode, 0)
+
+            handle = self.store._acquire_mutation_lock(timeout=0.5)
+            self.store._release_mutation_lock(handle)
+            self.assertTrue((self.channel / "_tasks.lock").is_file())
+        finally:
+            try:
+                _cleanup_process(process)
+            finally:
+                parent.close()
+
+    def test_task_lock_directory_fails_closed(self):
+        lock_path = self.channel / "_tasks.lock"
+        lock_path.mkdir()
+        with self.assertRaises(TaskValidationError) as error:
+            self.store._acquire_mutation_lock(timeout=0.01)
+        self.assertEqual(error.exception.code, "TASK_STORAGE_INVALID")
+        self.assertTrue(lock_path.is_dir())
+
+    def test_task_lock_symlink_fails_closed(self):
+        target = self.channel / "real-lock"
+        target.write_bytes(b"\0")
+        link = self.channel / "_tasks.lock"
+        try:
+            link.symlink_to(target)
+        except (OSError, NotImplementedError) as error:
+            self.skipTest(f"symlink creation unavailable: {error}")
+        with self.assertRaises(TaskValidationError) as raised:
+            self.store._acquire_mutation_lock(timeout=0.01)
+        self.assertEqual(raised.exception.code, "TASK_PATH_OUTSIDE_WORKSPACE")
+        self.assertTrue(link.is_symlink())
+
+
+    def test_task_lock_junction_fails_closed(self):
+        if os.name != "nt":
+            self.skipTest("Windows junction semantics do not apply on POSIX")
+        target = self.channel / "real-lock"
+        target.mkdir()
+        link = self.channel / "_tasks.lock"
+        try:
+            result = subprocess.run(
+                [
+                    "cmd.exe",
+                    "/d",
+                    "/c",
+                    "mklink",
+                    "/J",
+                    str(link),
+                    str(target),
+                ],
+                capture_output=True,
+                text=True,
+            )
+        except OSError as error:
+            target.rmdir()
+            self.skipTest(f"junction creation unavailable: {error}")
+        if result.returncode != 0:
+            target.rmdir()
+            self.skipTest(
+                f"junction creation unavailable: "
+                f"{result.stderr.strip() or result.stdout.strip()}"
+            )
+        try:
+            with self.assertRaises(TaskValidationError) as raised:
+                self.store._acquire_mutation_lock(timeout=0.01)
+            self.assertEqual(raised.exception.code, "TASK_PATH_OUTSIDE_WORKSPACE")
+            self.assertTrue(link.is_dir())
+        finally:
+            if link.exists():
+                link.rmdir()
+            target.rmdir()
+
+    def test_task_lock_release_is_idempotent(self):
+        handle = self.store._acquire_mutation_lock(timeout=0.5)
+        self.store._release_mutation_lock(handle)
+        self.store._release_mutation_lock(handle)
+        self.assertTrue((self.channel / "_tasks.lock").is_file())
+        reacquired = self.store._acquire_mutation_lock(timeout=0.5)
+        self.store._release_mutation_lock(reacquired)
+
 
     def tearDown(self):
         self.temp_dir.cleanup()
@@ -663,7 +824,7 @@ class TaskCommandTests(unittest.TestCase):
 
     def test_task_io_errors_use_stable_errors(self):
         with patch(
-            "agent_chat.task_store.os.mkdir",
+            "agent_chat.task_store.acquire_advisory_file_lock",
             side_effect=OSError("permission denied"),
         ):
             code, _, error = self.run_cli("task", "list", "review")

@@ -278,7 +278,6 @@ class PathLockStoreTests(unittest.TestCase):
                 self.channel,
                 root=self.root,
                 mutation_timeout=0.02,
-                mutation_stale=0,
             )
             with self.assertRaises(PathLockError) as error:
                 contender._acquire_mutation_lock()
