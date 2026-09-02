@@ -152,6 +152,8 @@ def validate_workspace_path(path: Any, workspace: Path | None = None) -> str:
     drive, _ = ntpath.splitdrive(portable)
     if drive or portable.startswith("/"):
         raise _path_error(path, "absolute paths are not allowed")
+    if ":" in portable:
+        raise _path_error(path, "path names may not contain ':'")
     parts = PurePosixPath(portable).parts
     if any(part == ".." for part in parts):
         raise _path_error(path, "parent traversal is not allowed")

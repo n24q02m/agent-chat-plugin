@@ -31,3 +31,8 @@
 **Vulnerability:** The application crashed with a raw stack trace when reading malformed UTF-8 bytes from stdin via `sys.stdin.read()`, causing a Denial of Service (DoS). The bytes were often converted to surrogate escapes which later caused `UnicodeEncodeError` when writing.
 **Learning:** `sys.stdin.read()` may not immediately fail on invalid UTF-8 depending on environment settings (e.g., using `surrogateescape`). These invalid strings can propagate and crash the application during later file writes. We must strictly force UTF-8 validation at the input boundary.
 **Prevention:** Force encoding of the read string via `data.encode("utf-8")` immediately after reading from `sys.stdin` and wrap it in a `try...except (OSError, UnicodeError):` block to fail securely.
+
+## 2024-12-18 - [Path Traversal bypass via Colon Character]
+**Vulnerability:** The application allowed the colon character (`:`) in workspace-relative path hints (`validate_workspace_path` in `agent_chat/task_model.py`), which enabled path traversal bypasses on Windows via drive letters (e.g. `C:boot.ini`) or Alternate Data Streams.
+**Learning:** `pathlib` resolving functions can interpret drive-letters outside of intended root directory boundaries if colons are not explicitly blocked in cross-platform path validation.
+**Prevention:** Always explicitly block the colon character (`:`) in user-supplied cross-platform filenames and paths.
