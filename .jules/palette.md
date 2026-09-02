@@ -24,3 +24,6 @@
 ## 2024-05-25 - Self-documenting CLI Interfaces
 **Learning:** For Python CLI applications, providing descriptive `help` text for all `argparse` arguments (both positional and optional) significantly improves usability by making the interface self-documenting via the `--help` flag.
 **Action:** Always add descriptive `help` parameters to all `add_argument` calls in CLI applications, not just the top-level commands.
+## 2026-08-31 - Adding help text for argparse arguments
+**Learning:** For Python CLI applications, providing descriptive `help` text for all `argparse` arguments (both positional and optional) significantly improves usability by making the interface self-documenting via the `--help` flag.
+**Action:** Always ensure that when defining CLI arguments using `argparse`, both positional and optional parameters are provided with a concise, descriptive `help` string to aid users in understanding the command's requirements and usage.
