@@ -53,12 +53,18 @@ def main() -> None:
                 continue
             cursor = chat.read_cursor(channel_path, name)
             unread = 0
-            for message in channel_path.glob("*.md"):
-                sequence = chat._seq_from_name(message.name)
-                if sequence is None or sequence <= cursor:
-                    continue
-                if chat.is_relevant(chat.parse_frontmatter(message), name):
-                    unread += 1
+            try:
+                with os.scandir(channel_path) as it:
+                    for entry in it:
+                        if not entry.name.endswith(".md"):
+                            continue
+                        sequence = chat._seq_from_name(entry.name)
+                        if sequence is None or sequence <= cursor:
+                            continue
+                        if chat.is_relevant(chat.parse_frontmatter(Path(entry.path)), name):
+                            unread += 1
+            except OSError:
+                pass
             if unread:
                 unread_by_channel.append((channel, unread))
 
