@@ -1144,7 +1144,12 @@ def build_parser() -> argparse.ArgumentParser:
     p.add_argument(
         "--root", help="chat root dir (default: $AGENT_CHAT_ROOT or ~/agent-chat)"
     )
-    sub = p.add_subparsers(dest="cmd", required=True)
+    sub = p.add_subparsers(
+        title="commands",
+        dest="cmd",
+        required=True,
+        help="choose a command to run"
+    )
 
 
     s = sub.add_parser("init", help="create a channel")
@@ -1174,7 +1179,12 @@ def build_parser() -> argparse.ArgumentParser:
     s.set_defaults(func=cmd_post)
 
     event = sub.add_parser("event", help="post/read adapter-neutral events")
-    event_sub = event.add_subparsers(dest="event_cmd", required=True)
+    event_sub = event.add_subparsers(
+        title="event commands",
+        dest="event_cmd",
+        required=True,
+        help="choose an event command to run"
+    )
     s = event_sub.add_parser("post", help="post a capability or status event")
     s.add_argument("channel", help="channel to post the event in")
     s.add_argument("--from", dest="sender", required=True, help="sender agent name")
@@ -1280,9 +1290,11 @@ def build_parser() -> argparse.ArgumentParser:
         help="manage structured task records",
     )
     task_sub = task.add_subparsers(
+        title="task commands",
         dest="task_cmd",
         required=True,
         parser_class=_TaskArgumentParser,
+        help="choose a task command to run",
     )
     task.error = _TaskArgumentParser.error.__get__(task, _TaskArgumentParser)
 
