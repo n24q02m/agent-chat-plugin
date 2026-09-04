@@ -29,3 +29,7 @@
 ## 2024-05-15 - Refactoring Path.glob() to os.scandir()
 **Learning:** `Path.glob()` instantiates a `Path` object for every matched file, causing significant overhead in loops when filtering files (like matching sequences and evaluating applicability). Replacing it with `os.scandir()` prevents unnecessary instantiation of Path objects for all files since `DirEntry` provides lightweight access to file names and attributes. Wrapping it in a `try...except OSError: pass` block is required, since `os.scandir()` raises an exception if the directory does not exist, unlike `Path.glob()` which yields an empty generator safely.
 **Action:** Always prefer `os.scandir()` combined with `try...except OSError` over `Path.glob()` for polling loops and frequent executions to improve speed while maintaining fault tolerance.
+
+## 2024-05-23 - Optimize string parsing for sequence extraction
+**Learning:** For simple string parsing in tight polling loops (e.g., extracting sequence numbers from filenames), using native string methods like `str.split()` and `.isdigit()` over uncompiled regular expressions (`re.match`) is significantly faster and reduces overhead.
+**Action:** Universally prefer native string methods over regex for simple pattern matching in critical paths.
