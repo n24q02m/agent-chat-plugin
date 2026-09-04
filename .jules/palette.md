@@ -27,3 +27,6 @@
 ## 2026-08-31 - Adding help text for argparse arguments
 **Learning:** For Python CLI applications, providing descriptive `help` text for all `argparse` arguments (both positional and optional) significantly improves usability by making the interface self-documenting via the `--help` flag.
 **Action:** Always ensure that when defining CLI arguments using `argparse`, both positional and optional parameters are provided with a concise, descriptive `help` string to aid users in understanding the command's requirements and usage.
+## 2024-05-14 - Improve argparse help text formatting
+**Learning:** For Python CLI applications, providing descriptive `help` text for all `argparse` arguments significantly improves usability. For `add_subparsers` groups specifically, use the `title` argument to replace the default 'positional arguments' header and the `help` argument to describe the command group, making the interface fully self-documenting via the `--help` flag.
+**Action:** Always include `title` and `help` arguments when adding subparsers in `argparse` to improve the `--help` output structure and clarity.
