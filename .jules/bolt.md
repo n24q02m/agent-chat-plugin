@@ -37,3 +37,6 @@
   that `int()` rejects, turning an ignored malformed filename into a polling
   crash. The bounded filename regex preserves the contract, and the repository
   corpus has not shown a material bottleneck that justifies a new parser.
+## 2024-05-24 - Faster sequence parsing using str.split
+**Learning:** For simple string parsing in tight polling loops (e.g., extracting sequence numbers from filenames), prefer using native string methods like `str.split()` and `.isdecimal()` over uncompiled regular expressions (`re.match`), as they are significantly faster and reduce overhead. `.isdecimal()` also correctly restricts matches to standard base-10 numerals, preventing `ValueError` crashes from Unicode superscript characters when using `int()`.
+**Action:** Use `str.split()` and `.isdecimal()` for basic string extraction tasks in performance-critical paths instead of `re.match`.

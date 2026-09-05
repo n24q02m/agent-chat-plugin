@@ -265,8 +265,12 @@ def require_channel(root: Path, channel: str) -> Path:
 
 
 def _seq_from_name(name: str) -> int | None:
-    m = re.match(r"(\d+)-", name)
-    return int(m.group(1)) if m else None
+    # Optimization: Use str.split and isdecimal instead of re.match for extracting sequence numbers.
+    # It is significantly faster in tight loops scanning large directories, and isdecimal prevents Unicode conversion errors.
+    parts = name.split('-', 1)
+    if len(parts) > 1 and parts[0].isdecimal():
+        return int(parts[0])
+    return None
 
 
 def message_files(chan: Path):
