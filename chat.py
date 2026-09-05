@@ -251,10 +251,10 @@ def require_channel(root: Path, channel: str) -> Path:
 
 
 def _seq_from_name(name: str) -> int | None:
-    # Optimization: Use str.split() and isdigit() instead of uncompiled regex
+    # Optimization: Use str.split() and isdecimal() instead of uncompiled regex
     # for ~37% faster parsing of sequence numbers in tight polling loops.
     parts = name.split("-", 1)
-    if len(parts) > 1 and parts[0].isdigit():
+    if len(parts) > 1 and parts[0].isdecimal():
         return int(parts[0])
     return None
 

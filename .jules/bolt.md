@@ -33,3 +33,7 @@
 ## 2024-11-20 - Fast Sequence Number Parsing with string methods
 **Learning:** `_seq_from_name` was using `re.match` which incurs overhead from the regex engine. In hot paths like `max_seq` where this function is called on potentially tens of thousands of files in a directory scan, this regex overhead creates a measurable performance bottleneck. Using `str.split()` and `.isdigit()` achieves the exact same parsing rules for sequence numbers without the regex engine overhead.
 **Action:** For simple prefix parsing in hot loops (like extracting leading digits before a delimiter), avoid uncompiled regular expressions and use native string methods like `split()` and `.isdigit()`, which benchmarked ~37% faster for this specific operation.
+
+## 2024-11-20 - String parsing isdigit() vs isdecimal()
+**Learning:** When parsing integers from strings in hot paths, using `str.isdigit()` is dangerous because it returns `True` for unicode superscript digits (like `²`), which subsequently causes `int()` to crash with a `ValueError`.
+**Action:** Always use `str.isdecimal()` instead of `str.isdigit()` when validating a string before passing it to `int()`, as `isdecimal()` correctly restricts matches to standard base-10 numerals.
