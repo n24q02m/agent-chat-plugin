@@ -251,12 +251,8 @@ def require_channel(root: Path, channel: str) -> Path:
 
 
 def _seq_from_name(name: str) -> int | None:
-    # Optimization: Use native string methods instead of regex for parsing message numbers
-    # in tight polling loops (e.g. read/wait), significantly faster for large folders
-    parts = name.split("-", 1)
-    if len(parts) == 2 and parts[0].isdigit():
-        return int(parts[0])
-    return None
+    m = re.match(r"(\d+)-", name)
+    return int(m.group(1)) if m else None
 
 
 def message_files(chan: Path):
