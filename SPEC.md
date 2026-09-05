@@ -102,6 +102,11 @@ Valid statuses are `open`, `in_progress`, `blocked`, `done` and `cancelled`. Tas
 
 A task may advance to `in_progress` or `done` only when every dependency has status `done`. Readiness is computed from task JSON, never message text. Same-state transitions are idempotent where the CLI documents them.
 
+`files_hint` values are portable workspace-relative metadata, not file operations.
+Both separator styles are recognized on every host; absolute/drive-relative paths,
+parent traversal, symlink escapes and colon-bearing names (including Windows
+alternate data streams) are rejected with `TASK_PATH_OUTSIDE_WORKSPACE`.
+
 ## 7. Leases and claims
 
 Structured task claims are JSON records under `claims/`.

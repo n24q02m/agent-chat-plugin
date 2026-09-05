@@ -1,3 +1,5 @@
+# CLAUDE.md - agent-chat-plugin
+
 # Agent Collaboration
 
 ## Quick reference

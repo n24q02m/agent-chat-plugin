@@ -9,13 +9,17 @@ description: Use when two or more agent sessions (Claude Code or other tools, sa
 
 Peer agent sessions coordinate by exchanging **markdown files in shared channel folders** — no supervisor, no message broker, no RAM shared between them. Each channel is one "group chat". The whole thread is plain markdown: git-committable, human-readable, replayable. A crashed session loses nothing — the files are the state.
 
-One CLI (`chat.py`, Python stdlib only) runs identically on Windows, WSL and Linux. `wait` blocks with a sleep-poll loop, so **an agent waiting for a reply burns zero model tokens** while idle.
+The stdlib-only CLI (`chat.py` plus the sibling `agent_chat/` package) runs on Windows, WSL and Linux. `wait` sleeps between filesystem checks and makes no model calls.
 
 **Core principle:** talk through files, not through each other. Summaries as artifacts, not full transcripts passed back and forth.
 
+This is a local coordination data layer, not an MCP server or agent executor.
+Messages, tasks, leases, path locks, capability/status events and derived state
+make no completion, embedding, rerank, graph-service or relay/provider calls.
+
 ## When to use
 
-- Multiple `claude` sessions (or Cursor/Codex/OpenCode) working the same problem as equals.
+- Multiple OMP or other compatible agent sessions working the same problem as equals.
 - One session needs another to do something, then waits for the result.
 - You want an auditable record of an agent negotiation.
 - You need **several independent group chats** (one per topic/team) — make one channel each.
@@ -24,7 +28,24 @@ One CLI (`chat.py`, Python stdlib only) runs identically on Windows, WSL and Lin
 
 ## Quick reference
 
-Run via `python <skill>/chat.py <cmd>`. Root = `$AGENT_CHAT_ROOT` or `~/agent-chat` (override with `--root`).
+Use `agent-chat <cmd>` after `pipx install agent-chat-plugin`, or
+`uvx --from agent-chat-plugin agent-chat <cmd>` for each one-off invocation.
+`uvx` does not install a persistent command. With a standalone skill, keep
+`SKILL.md`, `chat.py`, and the entire `agent_chat/` directory together and run
+`python "/path/to/skill/chat.py" <cmd>`. The examples abbreviate this as `chat.py`.
+
+The Claude Code plugin uses `python "${CLAUDE_PLUGIN_ROOT}/chat.py" <cmd>`.
+Other hosts use an actual checkout path, not an assumed plugin variable.
+Root precedence is `--root` > `$AGENT_CHAT_ROOT` > `~/agent-chat`; put `--root`
+before the subcommand. Separate machines' default roots are not synchronized.
+
+PyPI installs only the CLI/runtime modules. Optional `hooks/*.py` come from the
+checkout/plugin and need explicit host lifecycle wiring. Their Python entry
+points are portable; their registration and output contract is not automatically
+an OMP integration. Session/prompt notices are text; Stop emits Claude-compatible
+`systemMessage` JSON. Hooks peek without advancing cursors and always exit 0;
+unresolved `CLAUDE_PLUGIN_ROOT` or script-relative plugin roots skip with a
+one-line stderr diagnostic.
 
 | Do this | Command |
 |---|---|
@@ -231,7 +252,7 @@ Message frontmatter: `seq, from, to, reply_to?, channel, ts, status, title`. `to
 ## Protocol (the rules each session follows)
 
 1. **One channel per topic/team.** Don't cram everything into one folder — that was the prototype's failure. `channels` to discover, `init` to open a new group.
-2. **Claim before you act.** Use `claim` (atomic rename) or self-address a message before starting shared work. Lost the race (exit 3)? Move on — someone else has it.
+2. **Claim before you act.** Use `task claim <channel> <task-id> --as <agent> --lease-seconds 300` for structured tasks; honor owner, dependency and lease errors (exit 2). Legacy `claim <channel> task-12.md --as <agent>` handles marker files (lost race: exit 3). A self-addressed message is not a claim or a path lock.
 3. **Message, don't chat.** To ask a peer for something, `post` a file addressed `--to them`, then do other work or `wait`. Don't stream chatter.
 4. **Wait, don't poll with the LLM.** Use `wait` — it sleeps in-process. Never write a `while` loop that re-invokes the model to "check the folder" (millions of wasted tokens).
 5. **Read since your cursor.** `read --as you` shows only messages newer than your cursor and addressed to you or the group, then advances it. Don't re-ingest the whole thread each turn.
@@ -250,11 +271,16 @@ The savings vs naive peer messaging are real and structural: `wait` (idle = 0 to
 | Mistake | Fix |
 |---|---|
 | `while true; do read; done` in the LLM loop | Use `wait` — it blocks in-process, no tokens. |
-| Two sessions grab the same task | Use `claim` (atomic) — never eyeball the board. |
+| Two sessions grab the same task | Use `task claim` for structured work; `claim` is only for legacy marker files. |
 | Everything in one folder | One channel per topic; `init` more. |
 | Editing a peer's message to "reply" | Post a new file with `--reply`. |
 | Manually numbering files (`-11` twice) | Always `post` — it allocates seq under a lock. |
 
 ## Cross-platform
 
-Pure stdlib; no `inotify`/`fswatch` dependency. `wait` uses sleep-polling (default 5s) so it works the same on Windows (no inotify), WSL, and Linux. Atomic ops use `os.mkdir` (seq lock) and `os.replace` (claim), both atomic on NTFS and POSIX.
+Pure stdlib; no `inotify`/`fswatch` dependency. `wait` sleep-polls (default 5s).
+Messages and legacy marker claims use the channel sequence lock (`os.mkdir`);
+marker claims publish with `os.replace`. Task/path mutations use OS advisory
+file locks via `agent_chat/_advisory_lock.py`. Those regular files persist after
+release; never delete them or reclaim ownership from mtime. Expired domain
+leases and crash transaction markers still require explicit recovery.

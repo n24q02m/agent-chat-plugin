@@ -23,7 +23,6 @@ from agent_chat.task_model import (
 )
 from agent_chat.task_store import TaskStore
 
-
 TIMESTAMP = "2026-08-21T12:00:00+00:00"
 
 
@@ -147,7 +146,6 @@ class TaskStoreTests(unittest.TestCase):
         self.assertEqual(raised.exception.code, "TASK_PATH_OUTSIDE_WORKSPACE")
         self.assertTrue(link.is_symlink())
 
-
     def test_task_lock_junction_fails_closed(self):
         if os.name != "nt":
             self.skipTest("Windows junction semantics do not apply on POSIX")
@@ -194,7 +192,6 @@ class TaskStoreTests(unittest.TestCase):
         self.assertTrue((self.channel / "_tasks.lock").is_file())
         reacquired = self.store._acquire_mutation_lock(timeout=0.5)
         self.store._release_mutation_lock(reacquired)
-
 
     def tearDown(self):
         self.temp_dir.cleanup()
@@ -313,7 +310,14 @@ class TaskStoreTests(unittest.TestCase):
                 self.assertEqual(error.exception.code, "TASK_INVALID_TIMESTAMP")
 
     def test_files_hint_must_stay_inside_channel_workspace(self):
-        for path in ("../outside.txt", "/tmp/outside.txt", "C:\\outside.txt"):
+        for path in (
+            "../outside.txt",
+            "/tmp/outside.txt",
+            "C:\\outside.txt",
+            "C:boot.ini",
+            "docs/review.md:private",
+            "docs/C:boot.ini",
+        ):
             with self.subTest(path=path):
                 with self.assertRaises(TaskValidationError) as error:
                     self.store.create(
@@ -321,6 +325,22 @@ class TaskStoreTests(unittest.TestCase):
                         actor="alice",
                     )
                 self.assertEqual(error.exception.code, "TASK_PATH_OUTSIDE_WORKSPACE")
+
+    def test_stream_path_update_preserves_task_and_audit(self):
+        self.store.create(self.make_task(), actor="alice")
+        task_path = self.channel / "tasks" / "T-0001.json"
+        original_task = task_path.read_bytes()
+        original_messages = chat.message_files(self.channel)
+
+        with self.assertRaises(TaskValidationError) as error:
+            self.store.update(
+                "T-0001", actor="alice", files_hint=["docs/review.md:private"]
+            )
+
+        self.assertEqual(error.exception.code, "TASK_PATH_OUTSIDE_WORKSPACE")
+        self.assertEqual(task_path.read_bytes(), original_task)
+        self.assertEqual(chat.message_files(self.channel), original_messages)
+        self.assertEqual(self.store.show("T-0001").files_hint, ["docs/review.md"])
 
     def test_symlinked_files_hint_cannot_escape_workspace(self):
         outside = Path(self.temp_dir.name).parent / (self.root.name + "-outside")
@@ -346,9 +366,7 @@ class TaskStoreTests(unittest.TestCase):
         outside = Path(self.temp_dir.name).parent / (self.root.name + "-records")
         outside.mkdir()
         external_record = outside / "T-0001.json"
-        external_record.write_text(
-            json.dumps(self.task_data()), encoding="utf-8"
-        )
+        external_record.write_text(json.dumps(self.task_data()), encoding="utf-8")
         link = tasks / "T-0001.json"
         try:
             link.symlink_to(external_record)
@@ -357,9 +375,7 @@ class TaskStoreTests(unittest.TestCase):
         try:
             with self.assertRaises(TaskValidationError) as error:
                 self.store.list()
-            self.assertEqual(
-                error.exception.code, "TASK_PATH_OUTSIDE_WORKSPACE"
-            )
+            self.assertEqual(error.exception.code, "TASK_PATH_OUTSIDE_WORKSPACE")
         finally:
             link.unlink(missing_ok=True)
             external_record.unlink(missing_ok=True)
@@ -385,9 +401,7 @@ class TaskStoreTests(unittest.TestCase):
         try:
             with self.assertRaises(TaskValidationError) as error:
                 TaskStore(linked_channel, root=self.root)
-            self.assertEqual(
-                error.exception.code, "TASK_PATH_OUTSIDE_WORKSPACE"
-            )
+            self.assertEqual(error.exception.code, "TASK_PATH_OUTSIDE_WORKSPACE")
         finally:
             linked_channel.unlink(missing_ok=True)
             (outside_channel / "_meta.json").unlink(missing_ok=True)
@@ -400,49 +414,35 @@ class TaskStoreTests(unittest.TestCase):
         tasks.mkdir()
         first = self.task_data(id="T-0001", depends_on=["T-0002"])
         second = self.task_data(id="T-0002", depends_on=["T-0001"])
-        (tasks / "T-0001.json").write_text(
-            json.dumps(first), encoding="utf-8"
-        )
-        (tasks / "T-0002.json").write_text(
-            json.dumps(second), encoding="utf-8"
-        )
+        (tasks / "T-0001.json").write_text(json.dumps(first), encoding="utf-8")
+        (tasks / "T-0002.json").write_text(json.dumps(second), encoding="utf-8")
 
         for loader in (self.store.load, self.store.show):
             with self.subTest(loader=loader.__name__):
                 with self.assertRaises(TaskValidationError) as error:
                     loader("T-0001")
-                self.assertEqual(
-                    error.exception.code, "TASK_DEPENDENCY_CYCLE"
-                )
+                self.assertEqual(error.exception.code, "TASK_DEPENDENCY_CYCLE")
 
     def test_load_rejects_persisted_unknown_dependency(self):
         tasks = self.channel / "tasks"
         tasks.mkdir()
         record = self.task_data(depends_on=["T-9999"])
-        (tasks / "T-0001.json").write_text(
-            json.dumps(record), encoding="utf-8"
-        )
+        (tasks / "T-0001.json").write_text(json.dumps(record), encoding="utf-8")
 
         for loader in (self.store.load, self.store.show):
             with self.subTest(loader=loader.__name__):
                 with self.assertRaises(TaskValidationError) as error:
                     loader("T-0001")
-                self.assertEqual(
-                    error.exception.code, "TASK_UNKNOWN_DEPENDENCY"
-                )
+                self.assertEqual(error.exception.code, "TASK_UNKNOWN_DEPENDENCY")
 
     def test_nested_validation_uses_canonical_error_codes(self):
         with self.assertRaises(TaskValidationError) as acceptance_error:
             TaskRecord.from_dict(self.task_data(acceptance=[123]))
-        self.assertEqual(
-            acceptance_error.exception.code, "TASK_INVALID_ACCEPTANCE"
-        )
+        self.assertEqual(acceptance_error.exception.code, "TASK_INVALID_ACCEPTANCE")
 
         with self.assertRaises(TaskValidationError) as dependency_error:
             TaskRecord.from_dict(self.task_data(depends_on=[123]))
-        self.assertEqual(
-            dependency_error.exception.code, "TASK_INVALID_DEPENDENCY_ID"
-        )
+        self.assertEqual(dependency_error.exception.code, "TASK_INVALID_DEPENDENCY_ID")
 
     def test_audit_failure_rolls_back_create_and_update(self):
         def fail_audit(*args, **kwargs):
@@ -454,9 +454,7 @@ class TaskStoreTests(unittest.TestCase):
         self.assertEqual(create_error.exception.code, "TASK_AUDIT_FAILED")
         self.assertFalse((self.channel / "tasks" / "T-0001.json").exists())
 
-        self.store._post_event = TaskStore._post_event.__get__(
-            self.store, TaskStore
-        )
+        self.store._post_event = TaskStore._post_event.__get__(self.store, TaskStore)
         self.store.create(self.make_task(), actor="alice")
         self.store._post_event = fail_audit
         with self.assertRaises(TaskError) as update_error:
@@ -483,9 +481,7 @@ class TaskStoreTests(unittest.TestCase):
 
         def first_update():
             try:
-                self.store.update(
-                    "T-0001", actor="alice", status="in_progress"
-                )
+                self.store.update("T-0001", actor="alice", status="in_progress")
             except BaseException as error:
                 first_errors.append(error)
 
@@ -519,9 +515,7 @@ class TaskStoreTests(unittest.TestCase):
         original_bytes = path.read_bytes()
 
         with self.assertRaises(TaskValidationError) as error:
-            self.store.create(
-                self.make_task(title="Must not overwrite"), actor="bob"
-            )
+            self.store.create(self.make_task(title="Must not overwrite"), actor="bob")
 
         self.assertEqual(error.exception.code, "TASK_ALREADY_EXISTS")
         self.assertEqual(path.read_bytes(), original_bytes)
@@ -541,7 +535,6 @@ class TaskStoreTests(unittest.TestCase):
         bodies = [path.read_text(encoding="utf-8") for path in messages]
         self.assertTrue(any("task.created" in body for body in bodies))
         self.assertTrue(any("task.updated" in body for body in bodies))
-
 
     def test_show_dependency_snapshot_uses_one_authoritative_snapshot(self):
 
@@ -577,9 +570,7 @@ class TaskStoreTests(unittest.TestCase):
         def update_dependency():
             update_started.set()
             try:
-                self.store.update(
-                    "T-0001", actor="alice", status="in_progress"
-                )
+                self.store.update("T-0001", actor="alice", status="in_progress")
                 self.store.update("T-0001", actor="alice", status="done")
             finally:
                 update_finished.set()
@@ -653,7 +644,11 @@ class TaskCommandTests(unittest.TestCase):
         first_list = self.run_cli("task", "list", "review")
         second_list = self.run_cli("task", "list", "review")
         self.assertEqual(first_list, second_list)
-        self.assertTrue(re.search(r"T-0001\s+open\s+-\s+-\s+Document the review flow", first_list[1]))
+        self.assertTrue(
+            re.search(
+                r"T-0001\s+open\s+-\s+-\s+Document the review flow", first_list[1]
+            )
+        )
 
         code, updated, error = self.run_cli(
             "task",
@@ -722,7 +717,9 @@ class TaskCommandTests(unittest.TestCase):
         self.assertEqual(code, 2)
         self.assertIn("TASK_DEPENDENCY_NOT_READY", error)
         self.assertEqual(self.run_cli("task", "show", "review", "T-0002")[0], 0)
-        self.assertIn("status: open", self.run_cli("task", "show", "review", "T-0002")[1])
+        self.assertIn(
+            "status: open", self.run_cli("task", "show", "review", "T-0002")[1]
+        )
 
         self.assertEqual(
             self.run_cli(
@@ -779,7 +776,6 @@ class TaskCommandTests(unittest.TestCase):
         self.assertEqual(code, 0)
         self.assertEqual(error, "")
         self.assertIn("posted #", output)
-
 
     def test_task_status_commands_allow_idempotent_same_state_writes(self):
         self.assertEqual(
@@ -847,11 +843,10 @@ class TaskCommandTests(unittest.TestCase):
         self.assertEqual(code, 2)
         self.assertIn("TASK_INVALID_COMMAND", error)
 
-        code, _, error = self.run_cli(
-            "task", "show", "../review", "T-0001"
-        )
+        code, _, error = self.run_cli("task", "show", "../review", "T-0001")
         self.assertEqual(code, 2)
         self.assertIn("TASK_INVALID_CHANNEL", error)
+
 
 if __name__ == "__main__":
     unittest.main()

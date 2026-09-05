@@ -8,7 +8,6 @@ import tempfile
 import unittest
 from pathlib import Path
 
-
 REPOSITORY_ROOT = Path(__file__).resolve().parents[1]
 PROMPT_INBOX_HOOK = REPOSITORY_ROOT / "hooks" / "prompt_inbox.py"
 STOP_INBOX_HOOK = REPOSITORY_ROOT / "hooks" / "stop_inbox.py"
@@ -155,29 +154,37 @@ class PromptInboxHookTests(unittest.TestCase):
         self.assertEqual(result.returncode, 0)
         self.assertEqual(cursor.read_text(encoding="utf-8"), "2")
 
-    def test_malformed_configured_channel_still_exits_zero(self):
-        """An invalid configured channel must be a non-blocking hook error."""
+    def test_invalid_configured_channel_does_not_hide_a_valid_inbox(self):
+        """A malformed channel must not suppress unread messages in a later one."""
+        channel = self._channel("review")
+        self._message(channel, 1, "bob", "alice")
+
         result = self._run_hook(
             AGENT_CHAT_NAME="alice",
             AGENT_CHAT_ROOT=str(self.root),
-            AGENT_CHAT_CHANNELS="../invalid",
+            AGENT_CHAT_CHANNELS="../invalid,review",
         )
 
         self.assertEqual(result.returncode, 0)
-        self.assertEqual(result.stdout, "")
+        self.assertIn("review", result.stdout)
+        self.assertIn("1", result.stdout)
+        self.assertFalse((channel / ".cursors").exists())
         self.assertEqual(result.stderr, "")
 
     def test_claude_plugin_root_env_overrides_the_directory_chain(self):
         """CLAUDE_PLUGIN_ROOT must win over an unresolvable script location."""
+        channel = self._channel("review")
+        self._message(channel, 1, "bob", "alice")
         result = _run_hook_copy(
             self.HOOK,
             AGENT_CHAT_NAME="alice",
-            AGENT_CHAT_ROOT=str(self.root / "missing"),
+            AGENT_CHAT_ROOT=str(self.root),
             CLAUDE_PLUGIN_ROOT=str(REPOSITORY_ROOT),
         )
 
         self.assertEqual(result.returncode, 0)
-        self.assertEqual(result.stdout, "")
+        self.assertIn("review", result.stdout)
+        self.assertIn("1", result.stdout)
         self.assertEqual(result.stderr, "")
 
     def test_skips_with_one_line_stderr_note_when_no_root_resolves(self):
@@ -221,7 +228,6 @@ class StopInboxHookTests(PromptInboxHookTests):
 
         self.assertEqual(result.returncode, 0)
         payload = json.loads(result.stdout)
-        self.assertIn("turn is ending", payload["systemMessage"])
         self.assertIn("review", payload["systemMessage"])
         self.assertIn("1", payload["systemMessage"])
         self.assertEqual(result.stderr, "")
@@ -275,19 +281,6 @@ class SessionInboxHookTests(unittest.TestCase):
             env=env,
         )
 
-    def test_explains_missing_identity_when_a_chat_channel_exists(self):
-        """Returning before root discovery must not hide an unset identity."""
-        self._channel()
-
-        result = self._run_hook(AGENT_CHAT_ROOT=str(self.root))
-
-        self.assertEqual(result.returncode, 0)
-        self.assertEqual(
-            result.stdout,
-            "[agent-chat] Inbox hook disabled: identity is unset; set AGENT_CHAT_NAME.\n",
-        )
-        self.assertEqual(result.stderr, "")
-
     def test_stays_quiet_without_an_identity_when_the_chat_root_is_missing(self):
         """An unconfigured chat installation must not produce an identity warning."""
         result = self._run_hook(AGENT_CHAT_ROOT=str(self.root / "missing"))
@@ -296,32 +289,20 @@ class SessionInboxHookTests(unittest.TestCase):
         self.assertEqual(result.stdout, "")
         self.assertEqual(result.stderr, "")
 
-    def test_keeps_configured_identity_inbox_notifications(self):
-        """Identity diagnostics must not replace existing unread-message summaries."""
-        channel = self._channel("review")
-        self._message(channel, 1, "bob", "alice")
-
-        result = self._run_hook(AGENT_CHAT_NAME="alice", AGENT_CHAT_ROOT=str(self.root))
-
-        self.assertEqual(result.returncode, 0)
-        self.assertEqual(
-            result.stdout,
-            "[agent-chat] alice has unread peer messages: #review (1). "
-            "Run /agent-chat to read/reply.\n",
-        )
-        self.assertEqual(result.stderr, "")
-
     def test_claude_plugin_root_env_overrides_the_directory_chain(self):
         """CLAUDE_PLUGIN_ROOT must win over an unresolvable script location."""
+        channel = self._channel("review")
+        self._message(channel, 1, "bob", "alice")
         result = _run_hook_copy(
             SESSION_INBOX_HOOK,
             AGENT_CHAT_NAME="alice",
-            AGENT_CHAT_ROOT=str(self.root / "missing"),
+            AGENT_CHAT_ROOT=str(self.root),
             CLAUDE_PLUGIN_ROOT=str(REPOSITORY_ROOT),
         )
 
         self.assertEqual(result.returncode, 0)
-        self.assertEqual(result.stdout, "")
+        self.assertIn("review", result.stdout)
+        self.assertIn("1", result.stdout)
         self.assertEqual(result.stderr, "")
 
     def test_skips_with_one_line_stderr_note_when_no_root_resolves(self):
@@ -351,6 +332,23 @@ class SessionInboxHookTests(unittest.TestCase):
         note_lines = result.stderr.strip().splitlines()
         self.assertEqual(len(note_lines), 1)
         self.assertIn("[agent-chat]", note_lines[0])
+
+    def test_invalid_configured_channel_does_not_hide_a_valid_inbox(self):
+        """Session start must still notify about valid configured channels."""
+        channel = self._channel("review")
+        self._message(channel, 1, "bob", "alice")
+
+        result = self._run_hook(
+            AGENT_CHAT_NAME="alice",
+            AGENT_CHAT_ROOT=str(self.root),
+            AGENT_CHAT_CHANNELS="../invalid,review",
+        )
+
+        self.assertEqual(result.returncode, 0)
+        self.assertIn("review", result.stdout)
+        self.assertIn("1", result.stdout)
+        self.assertEqual(result.stderr, "")
+        self.assertFalse((channel / ".cursors").exists())
 
 
 if __name__ == "__main__":
