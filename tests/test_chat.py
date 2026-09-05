@@ -75,6 +75,7 @@ class ChatRegressionTests(unittest.TestCase):
             "0010-bob-last.md",
             "broken.md",
             "12x-nope.md",
+            "²-peer.md",
         ):
             (channel / name).write_text("body", encoding="utf-8")
 

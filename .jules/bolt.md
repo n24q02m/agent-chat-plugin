@@ -29,3 +29,11 @@
 ## 2024-05-15 - Refactoring Path.glob() to os.scandir()
 **Learning:** `Path.glob()` instantiates a `Path` object for every matched file, causing significant overhead in loops when filtering files (like matching sequences and evaluating applicability). Replacing it with `os.scandir()` prevents unnecessary instantiation of Path objects for all files since `DirEntry` provides lightweight access to file names and attributes. Wrapping it in a `try...except OSError: pass` block is required, since `os.scandir()` raises an exception if the directory does not exist, unlike `Path.glob()` which yields an empty generator safely.
 **Action:** Always prefer `os.scandir()` combined with `try...except OSError` over `Path.glob()` for polling loops and frequent executions to improve speed while maintaining fault tolerance.
+
+## Rejected
+
+- **2026-09-05 — `_seq_from_name` via `split()`/`isdigit()` (#162, #166, #171):**
+  Do not re-propose this rewrite. `str.isdigit()` accepts prefixes such as `²`
+  that `int()` rejects, turning an ignored malformed filename into a polling
+  crash. The bounded filename regex preserves the contract, and the repository
+  corpus has not shown a material bottleneck that justifies a new parser.

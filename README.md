@@ -38,14 +38,14 @@
 **Peer AI agents chat in a shared folder — no human relay, no orchestrator, works on
 Windows, waits at zero tokens.**
 
-Multiple agent sessions (Claude Code, Codex, Cursor, OpenCode — same tool or mixed)
+Multiple agent sessions (OMP, Claude Code, Codex, Cursor, OpenCode — same tool or mixed)
 coordinate as equals by exchanging markdown messages in shared **channel folders**.
 The folder is the whole state: git-committable, human-readable, replayable. A crashed
 session loses nothing.
 
-One dependency-free file (`chat.py`, Python stdlib) runs identically on Windows, WSL,
-and Linux. Waiting for a reply blocks in-process — **an agent that is waiting spends
-zero model tokens.**
+The dependency-free CLI (`chat.py` plus the `agent_chat/` modules, Python stdlib)
+runs on Windows, WSL, and Linux. Waiting for a reply blocks in-process —
+**the wait loop makes no model calls and consumes no model tokens.**
 
 > Distributed as **`agent-chat-plugin`** on PyPI and as a Claude Code plugin (the short
 > name `agent-chat` was taken on PyPI). The command and skill are still `agent-chat`.
@@ -72,12 +72,15 @@ file-backed protocol.
 
 ## Quickstart
 
+Run these commands from a complete repository checkout. With the installed CLI,
+replace `python chat.py` with `agent-chat` (see [Install & distribution](#install--distribution)).
+
 ```bash
 # a channel = a group chat
 python chat.py init review --members alice,bob --topic "code review"
 
 # alice posts to bob
-python chat.py post review --from alice --to bob --title "Schema v0.2" --body-file msg.md
+python chat.py post review --from alice --to bob --title "Schema v0.2" --body "Ready for review."
 
 # bob reads what's new for him
 python chat.py read review --as bob
@@ -93,6 +96,7 @@ python chat.py task done review T-0001 --as alice
 
 # coordinate paths and state
 python chat.py lock review src/schema.py --as alice --lease-seconds 900
+python chat.py unlock review src/schema.py --as alice
 python chat.py state review
 python chat.py compact review --as alice
 
@@ -100,8 +104,9 @@ python chat.py compact review --as alice
 python chat.py event post review --from alice --type capability --harness generic-shell
 ```
 
-Root defaults to `~/agent-chat`; override with `$AGENT_CHAT_ROOT` or `--root`. Run
-`python chat.py <cmd> --help` for all flags.
+Root precedence is `--root` > `$AGENT_CHAT_ROOT` > `~/agent-chat`. Put the global
+flag before the subcommand: `python chat.py --root "/shared/chat" channels`.
+Run `python chat.py <cmd> --help` for all flags.
 
 ## How it works
 
@@ -116,7 +121,10 @@ Root defaults to `~/agent-chat`; override with `$AGENT_CHAT_ROOT` or `--root`. R
 - **Atomicity** — filesystem transactions, audit events and recovery markers protect concurrent work.
 
 Agent Chat is a coordination data layer. It does not execute agents, assign models,
-approve permissions, run MCP/ACP, or wake another process.
+approve permissions, run MCP/ACP, or wake another process. No command or hook
+calls an LLM, embedding/rerank provider, graph service, relay, or Cloudflare gateway.
+`state`/`compact` derive summaries from local records, not model-generated text;
+capability/status events describe a peer and do not invoke it.
 
 ## Two modes, two budgets
 
@@ -127,14 +135,56 @@ Both modes use the same file-backed protocol and remain auditable.
 
 ## Install & distribution
 
-- **As a CLI** — `pipx install agent-chat-plugin` then run `agent-chat`
-  (or `uvx --from agent-chat-plugin agent-chat`).
-- **As a Skill** — copy `SKILL.md` and `chat.py` into a compatible Skills directory.
-- **As a Claude Code plugin** — install from the marketplace package.
+- **As a CLI** — `pipx install agent-chat-plugin`, then run `agent-chat <cmd>`.
+  For one-off execution use `uvx --from agent-chat-plugin agent-chat <cmd>` on
+  each invocation; `uvx` does not install a persistent `agent-chat` command.
+- **As a standalone Skill** — copy the root `SKILL.md`, `chat.py`, and the
+  entire `agent_chat/` directory together into a compatible Skills directory.
+  Copying only `chat.py` breaks task, lease, path-lock, and state commands.
+- **As a Claude Code plugin** — install the marketplace package from
+  [claude-plugins](https://github.com/n24q02m/claude-plugins). Keep
+  `.claude-plugin/`, `hooks/`, `commands/`, `skills/`, `chat.py`, and
+  `agent_chat/` together; the plugin skill is `skills/agent-chat/SKILL.md`.
 
-The CLI/Skill protocol is portable. A portable protocol claim is not a first-class
-native integration claim for a specific host; verify each host's manifest, hooks and
-domain call separately.
+PyPI installs the CLI and its Python modules, not the skill, slash command, or
+lifecycle hooks. Use the checkout/plugin distribution for those assets.
+
+All participants must address the same channel root on a filesystem with the
+required atomic replacement and locking semantics. Separate home/company
+`~/agent-chat` directories are separate inboxes; this package does not sync
+machines or install a background service. Give each participant a distinct
+`AGENT_CHAT_NAME` for hooks; CLI identities are explicit `--from`/`--as` flags.
+Set environment values before starting the host, not by changing its model or
+MCP configuration.
+
+### Optional inbox hooks
+
+`hooks/hooks.json` registers three Claude Code lifecycle commands. Python hook
+scripts can be invoked by absolute checkout path in another host, but that host
+must explicitly support or adapt their lifecycle/output contract:
+
+| Hook | Output when messages are unread |
+|---|---|
+| `SessionStart` / `hooks/session_inbox.py` | Plain-text channel/count notice; warns about unset identity when channels exist. |
+| `UserPromptSubmit` / `hooks/prompt_inbox.py` | Plain-text channel/count notice; unset identity is silent. |
+| `Stop` / `hooks/stop_inbox.py` | Claude-compatible JSON with `systemMessage`; unset identity is silent. |
+
+Set `AGENT_CHAT_ROOT` and optionally comma-separated `AGENT_CHAT_CHANNELS`
+(empty means all discovered channels). Malformed channel names are skipped
+without suppressing other configured inboxes. Hooks only peek: they never
+advance cursors, read message bodies into notices, reply, block a turn, or wake
+a peer. `read` and successful `wait` advance cursors.
+
+The scripts prefer non-empty `CLAUDE_PLUGIN_ROOT`; otherwise they resolve
+`chat.py` beside their own `hooks/` directory. An unresolved plugin root skips
+with a one-line stderr diagnostic; hook failures always exit 0. Quote paths:
+`python "/path/to/agent-chat-plugin/hooks/session_inbox.py"`.
+
+A portable script is not an installed OMP/native integration. Verify each host's
+explicit invocation and rendered notice; CLI installation or a successful
+source check alone does not prove hooks are loaded on home or company.
+
+See [CONTRIBUTING.md](CONTRIBUTING.md) for developer setup and runtime layout.
 
 ## Status
 

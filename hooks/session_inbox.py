@@ -1,13 +1,13 @@
 #!/usr/bin/env python3
 """SessionStart hook: peek this agent's agent-chat inbox for unread messages.
 
-Read-only -- never advances any cursor (that happens on `chat.py read`). Prints
-one compact summary line when there is something unread, prints nothing when
-there isn't, and always exits 0 so a missing/unconfigured chat root never
-fails session start. Python stdlib only; works on Windows, WSL and Linux.
+Read-only -- never advances any cursor (that happens on `chat.py read` or
+`wait`). Prints a compact unread summary, or an identity warning when channels
+exist but AGENT_CHAT_NAME is unset. Missing/unconfigured roots stay quiet.
+Always exits 0. Python stdlib only; works on Windows, WSL and Linux.
 
-Config (env vars, all optional except the first):
-  AGENT_CHAT_NAME     this agent's identity in the chat. Unset/empty -> no-op.
+Config (env vars):
+  AGENT_CHAT_NAME     this agent's identity; unset -> warn if channels exist.
   AGENT_CHAT_ROOT     chat root dir. Default: same as chat.py (~/agent-chat).
   AGENT_CHAT_CHANNELS comma-separated channels to check. Empty -> all channels
                       found under the root.
@@ -98,8 +98,11 @@ def main() -> None:
 
         unread_by_channel: list[tuple[str, int]] = []
         for ch in _channels_to_check(root, os.environ.get("AGENT_CHAT_CHANNELS", "")):
-            chan_dir = chat.channel_dir(root, ch)
-            if not (chan_dir / "_meta.json").exists():
+            try:
+                chan_dir = chat.channel_dir(root, ch)
+                if not (chan_dir / "_meta.json").exists():
+                    continue
+            except (chat.AgentChatError, OSError):
                 continue
             cursor = chat.read_cursor(chan_dir, name)
             unread = 0
@@ -113,7 +116,9 @@ def main() -> None:
                         seq = chat._seq_from_name(entry.name)
                         if seq is None or seq <= cursor:
                             continue
-                        if chat.is_relevant(chat.parse_frontmatter(Path(entry.path)), name):
+                        if chat.is_relevant(
+                            chat.parse_frontmatter(Path(entry.path)), name
+                        ):
                             unread += 1
             except OSError:
                 pass
@@ -126,9 +131,8 @@ def main() -> None:
                 f"[agent-chat] {name} has unread peer messages: {summary}. "
                 "Run /agent-chat to read/reply."
             )
-    # SystemExit too: chat.channel_dir() calls die() on a malformed channel name
-    # (e.g. a stray entry in AGENT_CHAT_CHANNELS), and SystemExit is a
-    # BaseException -- an `except Exception` alone would let it fail the session.
+    # Hook errors must not fail the host session, including SystemExit raised
+    # by an imported CLI path.
     except (Exception, SystemExit):
         return
 
