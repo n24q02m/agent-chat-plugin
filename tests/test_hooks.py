@@ -155,21 +155,24 @@ class PromptInboxHookTests(unittest.TestCase):
         self.assertEqual(cursor.read_text(encoding="utf-8"), "2")
 
     def test_invalid_configured_channel_does_not_hide_a_valid_inbox(self):
-        """A malformed channel must not suppress unread messages in a later one."""
+        """Invalid channels must not suppress unread messages in a later one."""
         channel = self._channel("review")
         self._message(channel, 1, "bob", "alice")
 
-        result = self._run_hook(
-            AGENT_CHAT_NAME="alice",
-            AGENT_CHAT_ROOT=str(self.root),
-            AGENT_CHAT_CHANNELS="../invalid,review",
-        )
+        for invalid_channel in ("../invalid", "a" * 256):
+            with self.subTest(invalid_channel=invalid_channel):
+                result = self._run_hook(
+                    AGENT_CHAT_NAME="alice",
+                    AGENT_CHAT_ROOT=str(self.root),
+                    AGENT_CHAT_CHANNELS=f"{invalid_channel},review",
+                )
 
-        self.assertEqual(result.returncode, 0)
-        self.assertIn("review", result.stdout)
-        self.assertIn("1", result.stdout)
+                self.assertEqual(result.returncode, 0)
+                self.assertIn("review", result.stdout)
+                self.assertIn("1", result.stdout)
+                self.assertEqual(result.stderr, "")
+
         self.assertFalse((channel / ".cursors").exists())
-        self.assertEqual(result.stderr, "")
 
     def test_claude_plugin_root_env_overrides_the_directory_chain(self):
         """CLAUDE_PLUGIN_ROOT must win over an unresolvable script location."""
@@ -338,16 +341,19 @@ class SessionInboxHookTests(unittest.TestCase):
         channel = self._channel("review")
         self._message(channel, 1, "bob", "alice")
 
-        result = self._run_hook(
-            AGENT_CHAT_NAME="alice",
-            AGENT_CHAT_ROOT=str(self.root),
-            AGENT_CHAT_CHANNELS="../invalid,review",
-        )
+        for invalid_channel in ("../invalid", "a" * 256):
+            with self.subTest(invalid_channel=invalid_channel):
+                result = self._run_hook(
+                    AGENT_CHAT_NAME="alice",
+                    AGENT_CHAT_ROOT=str(self.root),
+                    AGENT_CHAT_CHANNELS=f"{invalid_channel},review",
+                )
 
-        self.assertEqual(result.returncode, 0)
-        self.assertIn("review", result.stdout)
-        self.assertIn("1", result.stdout)
-        self.assertEqual(result.stderr, "")
+                self.assertEqual(result.returncode, 0)
+                self.assertIn("review", result.stdout)
+                self.assertIn("1", result.stdout)
+                self.assertEqual(result.stderr, "")
+
         self.assertFalse((channel / ".cursors").exists())
 
 

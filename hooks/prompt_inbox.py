@@ -45,9 +45,9 @@ def main() -> None:
         ):
             try:
                 channel_path = chat.channel_dir(root, channel)
-            except chat.AgentChatError:
-                continue
-            if not (channel_path / "_meta.json").exists():
+                if not (channel_path / "_meta.json").exists():
+                    continue
+            except (chat.AgentChatError, OSError):
                 continue
             cursor = chat.read_cursor(channel_path, name)
             unread = 0

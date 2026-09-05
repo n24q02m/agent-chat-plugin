@@ -27,3 +27,10 @@
 ## 2026-08-31 - Adding help text for argparse arguments
 **Learning:** For Python CLI applications, providing descriptive `help` text for all `argparse` arguments (both positional and optional) significantly improves usability by making the interface self-documenting via the `--help` flag.
 **Action:** Always ensure that when defining CLI arguments using `argparse`, both positional and optional parameters are provided with a concise, descriptive `help` string to aid users in understanding the command's requirements and usage.
+
+## Rejected
+
+- **2026-09-05 — Additional subparser title/help PRs (#163, #170):**
+  The top-level, event and task command groups now have explicit titles and
+  descriptions. Check the current `chat.py --help`, `chat.py event --help` and
+  `chat.py task --help` output before proposing another help-only rewrite.

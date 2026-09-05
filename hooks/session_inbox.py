@@ -100,9 +100,9 @@ def main() -> None:
         for ch in _channels_to_check(root, os.environ.get("AGENT_CHAT_CHANNELS", "")):
             try:
                 chan_dir = chat.channel_dir(root, ch)
-            except chat.AgentChatError:
-                continue
-            if not (chan_dir / "_meta.json").exists():
+                if not (chan_dir / "_meta.json").exists():
+                    continue
+            except (chat.AgentChatError, OSError):
                 continue
             cursor = chat.read_cursor(chan_dir, name)
             unread = 0
