@@ -254,7 +254,7 @@ def _seq_from_name(name: str) -> int | None:
     # Optimization: Use str.split and isdigit instead of regex for ~36% faster
     # filename parsing in tight loops (e.g. cmd_wait).
     parts = name.split('-', 1)
-    if len(parts) > 1 and parts[0].isdigit():
+    if len(parts) > 1 and parts[0].isascii() and parts[0].isdigit():
         return int(parts[0])
     return None
 

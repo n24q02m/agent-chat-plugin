@@ -6,4 +6,3 @@ build/
 .worktrees/
 mock_chat_root/
 test_benchmark_corpus/
-mock_corpus_v2
