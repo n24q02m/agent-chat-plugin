@@ -10,7 +10,7 @@ requires-python = ">=3.8"
 license = { text = "Apache-2.0" }
 authors = [{ name = "n24q02m" }]
 keywords = ["multi-agent", "coordination", "markdown", "blackboard", "claude-code", "agent-skills", "peer-to-peer"]
-version = "0.6.1-beta.1"  # managed by python-semantic-release; do not hand-edit
+version = "0.6.1-beta.2"  # managed by python-semantic-release; do not hand-edit
 classifiers = [
   "Programming Language :: Python :: 3",
   "License :: OSI Approved :: Apache Software License",
