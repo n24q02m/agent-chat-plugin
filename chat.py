@@ -800,11 +800,14 @@ def _state_store(root: Path, channel: str):
 def cmd_state(root: Path, a):
     store = _state_store(root, a.channel)
     if getattr(a, "write", False):
-        summary = store.compact(
-            actor=getattr(a, "actor", None),
-            audit=not getattr(a, "no_audit", False),
-            strict=getattr(a, "strict", False),
-        )
+        # The durable audit message is internal state; JSON mode must emit only
+        # the requested document.
+        with contextlib.redirect_stdout(io.StringIO()):
+            summary = store.compact(
+                actor=getattr(a, "actor", None),
+                audit=not getattr(a, "no_audit", False),
+                strict=getattr(a, "strict", False),
+            )
         if getattr(a, "json", False):
             print(json.dumps(summary.to_dict(), indent=2, sort_keys=True))
         else:
@@ -820,11 +823,13 @@ def cmd_state(root: Path, a):
 
 def cmd_compact(root: Path, a):
     store = _state_store(root, a.channel)
-    summary = store.compact(
-        actor=getattr(a, "actor", None),
-        audit=not getattr(a, "no_audit", False),
-        strict=getattr(a, "strict", False),
-    )
+    # Keep the audit message while reserving stdout for this command's result.
+    with contextlib.redirect_stdout(io.StringIO()):
+        summary = store.compact(
+            actor=getattr(a, "actor", None),
+            audit=not getattr(a, "no_audit", False),
+            strict=getattr(a, "strict", False),
+        )
     if getattr(a, "json", False):
         print(json.dumps(summary.to_dict(), indent=2, sort_keys=True))
     else:
