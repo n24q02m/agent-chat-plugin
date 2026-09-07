@@ -1013,7 +1013,9 @@ def cmd_task_list(root: Path, a):
     rows = []
     for task in tasks:
         owner = task.owner or "-"
-        dependencies = ",".join(task.depends_on) or "-"
+        dependencies = ", ".join(task.depends_on) or "-"
+        if len(dependencies) > 40:
+            dependencies = dependencies[:37] + "..."
         rows.append((task.id, task.status, owner, dependencies, task.title))
     w_id = max(len("ID"), max(len(r[0]) for r in rows))
     w_status = max(len("STATUS"), max(len(r[1]) for r in rows))
@@ -1046,9 +1048,9 @@ def cmd_task_show(root: Path, a):
     print(f"status: {task.status}")
     print(f"owner: {task.owner or '-'}")
     print(f"created_by: {task.created_by}")
-    print(f"depends_on: {','.join(task.depends_on) or '-'}")
+    print(f"depends_on: {', '.join(task.depends_on) or '-'}")
     print(f"dependencies: {dependency_summary}")
-    print(f"files_hint: {','.join(task.files_hint) or '-'}")
+    print(f"files_hint: {', '.join(task.files_hint) or '-'}")
     print(f"acceptance: {'; '.join(task.acceptance) or '-'}")
     print(f"lease_expires_at: {task.lease_expires_at or '-'}")
     print(f"branch: {task.branch or '-'}")
