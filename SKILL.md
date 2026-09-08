@@ -41,4 +41,4 @@ The CLI is portable across Windows, WSL, and Linux. A portable CLI or Python scr
 
 Tasks, leases, path locks, derived state, and adapter-neutral capability/status events use the same channel root. Mutation errors are nonzero with stable `TASK_*`, `LEASE_*`, `PATH_LOCK_*`, or `STATE_*` codes. `state.md` is derived and never authoritative. `compact` is non-destructive and retains source records.
 
-Read the detailed command and recovery reference in `skills/agent-chat/reference.md`. The plugin slash command is `commands/agent-chat.md`; the package/runtime guidance mirror is `CLAUDE.md`.
+The standalone entry is complete without plugin-only reference files. Other hosts must package their own detailed operational reference when needed.

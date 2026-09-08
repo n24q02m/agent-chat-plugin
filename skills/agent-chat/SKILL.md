@@ -51,4 +51,4 @@ Claims and path locks are owner-bound and crash-safe. Expired work requires expl
 - `AGENT_CHAT_CHANNELS` restricts the scan; malformed configured names are skipped independently.
 - Hooks prefer non-empty `CLAUDE_PLUGIN_ROOT`, then resolve `chat.py` beside `hooks/`; unresolved roots emit one stderr note and exit zero.
 
-Other hosts must adapt lifecycle registration and output interpretation explicitly. CLI portability does not prove native hook loading. See `skills/agent-chat/reference.md` for event schemas, recovery codes, and host-specific boundaries.
+See `reference.md` in this skill directory for event schemas, recovery codes, and host-specific boundaries.
