@@ -17,10 +17,11 @@ subcommand), `AGENT_CHAT_ROOT`, then `~/agent-chat`.
 
 PyPI does not install the skill, slash command, or inbox hooks. Checkout/plugin
 hooks may be invoked by absolute path, but the host must explicitly wire the
-lifecycle and interpret the output: session/prompt notices are text, Stop
-emits Claude-compatible `systemMessage` JSON. Hooks only peek, always exit 0,
-and skip unresolved plugin roots with a one-line stderr note. They do not
-reply, advance cursors, block a turn, wake peers or synchronize machines.
+lifecycle and interpret the output: session/prompt notices are bounded text,
+Stop emits bounded Claude-compatible `systemMessage` JSON. Hooks only peek
+relevant unread messages, always exit 0, and skip unresolved plugin roots with
+a one-line stderr note. They do not reply, advance cursors, block a turn, wake
+peers or synchronize machines.
 
 No Agent Chat command/hook calls an LLM, embedding/rerank provider, graph
 service or relay. This is not an MCP server. Do not change a host's models,

@@ -45,6 +45,22 @@ def _channels_to_check(root: Path, requested: str) -> list[str]:
     return sorted(found)
 
 
+def _bounded_unread_summary(
+    entries: list[tuple[str, int]], max_chars: int = 190
+) -> str:
+    """Render unread channels without exceeding the hook context budget."""
+    parts: list[str] = []
+    for channel, count in entries:
+        item = f"#{channel} ({count})"
+        candidate = ", ".join([*parts, item])
+        if len(candidate) > max_chars:
+            if not parts:
+                return item[: max_chars - 1] + "…" if max_chars > 1 else "…"
+            return ", ".join([*parts, "…"])
+        parts.append(item)
+    return ", ".join(parts)
+
+
 def main() -> None:
     # Import chat.py from the plugin root. Claude Code sets CLAUDE_PLUGIN_ROOT
     # for hook commands; other harnesses fall back to this script's own
@@ -126,7 +142,7 @@ def main() -> None:
                 unread_by_channel.append((ch, unread))
 
         if unread_by_channel:
-            summary = ", ".join(f"#{ch} ({n})" for ch, n in unread_by_channel)
+            summary = _bounded_unread_summary(unread_by_channel)
             print(
                 f"[agent-chat] {name} has unread peer messages: {summary}. "
                 "Run /agent-chat to read/reply."
