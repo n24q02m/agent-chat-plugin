@@ -191,7 +191,7 @@ class TaskStore:
             raise TaskValidationError(
                 "TASK_NOT_FOUND", f"task record does not exist: {path.stem}"
             )
-        except (OSError, UnicodeError, json.JSONDecodeError) as error:
+        except (OSError, UnicodeDecodeError, json.JSONDecodeError) as error:
             raise TaskValidationError(
                 "TASK_INVALID_RECORD",
                 f"could not read task record {path.name}: {error}",

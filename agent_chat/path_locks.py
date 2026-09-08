@@ -622,7 +622,7 @@ class PathLockStore:
             raise PathLockError(
                 "PATH_LOCK_NOT_FOUND", f"lock record does not exist: {path.stem}"
             ) from error
-        except (OSError, UnicodeError, json.JSONDecodeError) as error:
+        except (OSError, UnicodeDecodeError, json.JSONDecodeError) as error:
             raise PathLockError(
                 "PATH_LOCK_INVALID_RECORD",
                 f"could not read lock record {path.name}: {error}",

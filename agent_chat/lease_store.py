@@ -315,7 +315,7 @@ class LeaseStore:
                 raw = json.load(stream)
         except FileNotFoundError:
             raise LeaseError("LEASE_NOT_FOUND", f"lease record does not exist: {path.name}")
-        except (OSError, UnicodeError, json.JSONDecodeError) as error:
+        except (OSError, UnicodeDecodeError, json.JSONDecodeError) as error:
             raise LeaseError(
                 "LEASE_INVALID_RECORD",
                 f"could not read lease record {path.name}: {error}",
@@ -603,7 +603,7 @@ class LeaseStore:
             return None
         try:
             raw = json.loads(path.read_text(encoding="utf-8"))
-        except (OSError, UnicodeError, json.JSONDecodeError) as error:
+        except (OSError, UnicodeDecodeError, json.JSONDecodeError) as error:
             raise LeaseError(
                 "LEASE_TRANSACTION_INVALID",
                 f"could not read transaction journal: {error}",
@@ -841,7 +841,7 @@ class LeaseStore:
         for path in chat.message_files(self.channel):
             try:
                 body = path.read_text(encoding="utf-8")
-            except (OSError, UnicodeError):
+            except (OSError, UnicodeDecodeError):
                 continue
             if marker in body:
                 return True
