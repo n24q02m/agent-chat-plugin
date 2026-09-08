@@ -37,3 +37,7 @@
   that `int()` rejects, turning an ignored malformed filename into a polling
   crash. The bounded filename regex preserves the contract, and the repository
   corpus has not shown a material bottleneck that justifies a new parser.
+
+## 2024-11-20 - Safe Native String Parsing for Integers
+**Learning:** For simple string parsing in tight polling loops, native string methods are faster than uncompiled regular expressions. However, when validating strings for integer conversion (`int()`), `str.isdigit()` can return `True` for Unicode superscript characters (like `²`), which causes `int()` to crash with a `ValueError`.
+**Action:** When validating strings for integer conversion in Python, always use `str.isdecimal()` instead of `str.isdigit()` to safely restrict matches to standard base-10 numerals and prevent application crashes.
