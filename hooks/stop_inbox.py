@@ -29,7 +29,7 @@ def main() -> None:
         return
     sys.path.insert(0, plugin_root)
     try:
-        from session_inbox import _channels_to_check
+        from session_inbox import _bounded_unread_summary, _channels_to_check
 
         import chat
     except Exception:
@@ -71,9 +71,7 @@ def main() -> None:
                 unread_by_channel.append((channel, unread))
 
         if unread_by_channel:
-            summary = ", ".join(
-                f"#{channel} ({count})" for channel, count in unread_by_channel
-            )
+            summary = _bounded_unread_summary(unread_by_channel, max_chars=175)
             print(
                 json.dumps(
                     {
@@ -81,7 +79,8 @@ def main() -> None:
                             "[agent-chat] Your turn is ending with unread peer messages: "
                             f"{summary}. Run /agent-chat to read/reply."
                         )
-                    }
+                    },
+                    separators=(",", ":"),
                 )
             )
     except (Exception, SystemExit):

@@ -218,6 +218,25 @@ class PromptInboxHookTests(unittest.TestCase):
         self.assertEqual(len(note_lines), 1)
         self.assertIn("[agent-chat]", note_lines[0])
 
+    def test_unread_notice_is_bounded_across_many_relevant_channels(self):
+        """Hook stdout stays within the context budget with many channels."""
+        channel_names = [f"channel-{index:02d}" for index in range(20)]
+        for channel_name in channel_names:
+            channel = self._channel(channel_name)
+            self._message(channel, 1, "bob", "alice")
+
+        result = self._run_hook(
+            AGENT_CHAT_NAME="alice",
+            AGENT_CHAT_ROOT=str(self.root),
+            AGENT_CHAT_CHANNELS=",".join(channel_names),
+        )
+
+        self.assertEqual(result.returncode, 0)
+        self.assertLessEqual(len(result.stdout), 300)
+        self.assertIn("channel-00", result.stdout)
+        self.assertTrue("…" in result.stdout or "\\u2026" in result.stdout)
+        self.assertEqual(result.stderr, "")
+
 
 class StopInboxHookTests(PromptInboxHookTests):
     HOOK = STOP_INBOX_HOOK
@@ -335,6 +354,25 @@ class SessionInboxHookTests(unittest.TestCase):
         note_lines = result.stderr.strip().splitlines()
         self.assertEqual(len(note_lines), 1)
         self.assertIn("[agent-chat]", note_lines[0])
+
+    def test_unread_notice_is_bounded_across_many_relevant_channels(self):
+        """SessionStart stdout stays within the context budget."""
+        channel_names = [f"channel-{index:02d}" for index in range(20)]
+        for channel_name in channel_names:
+            channel = self._channel(channel_name)
+            self._message(channel, 1, "bob", "alice")
+
+        result = self._run_hook(
+            AGENT_CHAT_NAME="alice",
+            AGENT_CHAT_ROOT=str(self.root),
+            AGENT_CHAT_CHANNELS=",".join(channel_names),
+        )
+
+        self.assertEqual(result.returncode, 0)
+        self.assertLessEqual(len(result.stdout), 300)
+        self.assertIn("channel-00", result.stdout)
+        self.assertIn("…", result.stdout)
+        self.assertEqual(result.stderr, "")
 
     def test_invalid_configured_channel_does_not_hide_a_valid_inbox(self):
         """Session start must still notify about valid configured channels."""

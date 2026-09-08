@@ -170,10 +170,12 @@ must explicitly support or adapt their lifecycle/output contract:
 | `Stop` / `hooks/stop_inbox.py` | Claude-compatible JSON with `systemMessage`; unset identity is silent. |
 
 Set `AGENT_CHAT_ROOT` and optionally comma-separated `AGENT_CHAT_CHANNELS`
-(empty means all discovered channels). Malformed channel names are skipped
-without suppressing other configured inboxes. Hooks only peek: they never
-advance cursors, read message bodies into notices, reply, block a turn, or wake
-a peer. `read` and successful `wait` advance cursors.
+to restrict checks to relevant channels (empty means all discovered channels).
+Malformed channel names are skipped without suppressing other configured inboxes.
+Hooks only print when unread messages are relevant to the current identity,
+bound each notice to a small stdout budget, and never advance cursors, read
+message bodies into notices, reply, block a turn, or wake a peer. `read` and
+successful `wait` advance cursors.
 
 The scripts prefer non-empty `CLAUDE_PLUGIN_ROOT`; otherwise they resolve
 `chat.py` beside their own `hooks/` directory. An unresolved plugin root skips
