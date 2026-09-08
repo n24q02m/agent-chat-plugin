@@ -37,3 +37,6 @@
 ## 2024-06-25 - Cleaner CLI help output for subcommands
 **Learning:** For Python CLI applications, providing descriptive `help` text for `argparse` arguments improves usability. For `add_subparsers` groups specifically, explicitly set the `metavar` argument (e.g., `metavar="COMMAND"`) to prevent the default, verbose listing of all subcommands in curly braces, making the usage string much cleaner.
 **Action:** When defining `add_subparsers` in Python `argparse`, explicitly set `metavar` to improve readability.
+## 2024-09-08 - Add metavar to argparse subparsers
+**Learning:** For Python CLI applications using `argparse`, adding a `metavar` argument to `add_subparsers` groups significantly improves the readability of the `--help` output by replacing the default verbose positional argument list with a clean placeholder.
+**Action:** When adding sub-commands to Python CLIs, always explicitly set the `metavar` on the subparser group to a clear, singular noun (e.g., `COMMAND`) to keep the help text clean.
