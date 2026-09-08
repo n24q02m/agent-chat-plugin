@@ -37,7 +37,3 @@
   that `int()` rejects, turning an ignored malformed filename into a polling
   crash. The bounded filename regex preserves the contract, and the repository
   corpus has not shown a material bottleneck that justifies a new parser.
-
-## 2024-11-20 - Fast string parsing in polling loops
-**Learning:** For simple string parsing in tight polling loops (e.g., extracting sequence numbers from filenames), uncompiled regular expressions (`re.match`) introduce unnecessary overhead. Native string methods like `str.split()` and `.isdecimal()` are significantly faster (2.4x) and reduce overhead.
-**Action:** When extracting components from strings in hot paths, prefer native string methods over regex. Always use `.isdecimal()` instead of `.isdigit()` to safely check if a string can be converted to an integer without crashing on Unicode superscripts (like `²`).
