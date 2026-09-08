@@ -2,6 +2,14 @@
 
 <!-- version list -->
 
+## v0.6.1-beta.4 (2026-09-08)
+
+### Bug Fixes
+
+- Keep skill references portable
+  ([`b9e0136`](https://github.com/n24q02m/agent-chat-plugin/commit/b9e0136d83081b80322be67a947545effee6b0b1))
+
+
 ## v0.6.1-beta.3 (2026-09-08)
 
 ### Bug Fixes
