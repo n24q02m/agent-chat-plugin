@@ -1187,6 +1187,7 @@ def build_parser() -> argparse.ArgumentParser:
         dest="cmd",
         required=True,
         help="available commands",
+        metavar="COMMAND",
     )
 
     s = sub.add_parser("init", help="create a channel")
@@ -1223,6 +1224,7 @@ def build_parser() -> argparse.ArgumentParser:
         dest="event_cmd",
         required=True,
         help="available event commands",
+        metavar="COMMAND",
     )
     s = event_sub.add_parser("post", help="post a capability or status event")
     s.add_argument("channel", help="channel to post the event in")
@@ -1406,6 +1408,7 @@ def build_parser() -> argparse.ArgumentParser:
         required=True,
         parser_class=_TaskArgumentParser,
         help="available task commands",
+        metavar="COMMAND",
     )
     task.error = _TaskArgumentParser.error.__get__(task, _TaskArgumentParser)
 
