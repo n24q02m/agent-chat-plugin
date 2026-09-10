@@ -40,3 +40,6 @@
 ## 2024-09-08 - Add metavar to argparse subparsers
 **Learning:** For Python CLI applications using `argparse`, adding a `metavar` argument to `add_subparsers` groups significantly improves the readability of the `--help` output by replacing the default verbose positional argument list with a clean placeholder.
 **Action:** When adding sub-commands to Python CLIs, always explicitly set the `metavar` on the subparser group to a clear, singular noun (e.g., `COMMAND`) to keep the help text clean.
+## 2024-05-27 - List formatting in Task CLI output
+**Learning:** Raw lists formatted without spaces (e.g., `task-1,task-2`) in CLI tables and task detail views are visually dense and harder to read.
+**Action:** Use ", " (comma + space) to format list items in CLI output to improve readability and visual spacing.
