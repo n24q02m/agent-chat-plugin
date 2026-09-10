@@ -34,3 +34,6 @@
   The top-level, event and task command groups now have explicit titles and
   descriptions. Check the current `chat.py --help`, `chat.py event --help` and
   `chat.py task --help` output before proposing another help-only rewrite.
+## 2024-06-25 - Cleaner CLI help output for subcommands
+**Learning:** For Python CLI applications, providing descriptive `help` text for `argparse` arguments improves usability. For `add_subparsers` groups specifically, explicitly set the `metavar` argument (e.g., `metavar="COMMAND"`) to prevent the default, verbose listing of all subcommands in curly braces, making the usage string much cleaner.
+**Action:** When defining `add_subparsers` in Python `argparse`, explicitly set `metavar` to improve readability.
