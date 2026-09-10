@@ -679,9 +679,15 @@ class PathLockStore:
                 f"lock storage is not a directory: {self.locks_dir}",
             )
         records: list[PathLockRecord] = []
-        for path in sorted(self.locks_dir.glob("*.json"), key=lambda item: item.name):
-            if path.name.startswith((".", "_")):
-                continue
+        paths = []
+        try:
+            with os.scandir(self.locks_dir) as it:
+                for entry in it:
+                    if entry.name.endswith(".json") and not entry.name.startswith((".", "_")):
+                        paths.append(Path(entry.path))
+        except OSError:
+            pass
+        for path in sorted(paths, key=lambda item: item.name):
             records.append(self._read_record(path))
         return records
 

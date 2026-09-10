@@ -41,3 +41,6 @@
 ## 2024-11-20 - Safe Native String Parsing for Integers
 **Learning:** For simple string parsing in tight polling loops, native string methods are faster than uncompiled regular expressions. However, when validating strings for integer conversion (`int()`), `str.isdigit()` can return `True` for Unicode superscript characters (like `²`), which causes `int()` to crash with a `ValueError`.
 **Action:** When validating strings for integer conversion in Python, always use `str.isdecimal()` instead of `str.isdigit()` to safely restrict matches to standard base-10 numerals and prevent application crashes.
+## 2024-11-20 - Avoid Path.glob for JSON records in task/path lock stores
+**Learning:** `TaskStore._read_all` and `PathLockStore._read_all` were using `Path.glob("*.json")` to scan directories for records. This incurs significant `Path` instantiation overhead for large sets of tasks or locks, scaling poorly.
+**Action:** Replace `Path.glob` with `os.scandir` combined with `try...except OSError`, creating `Path` objects only for matching `.json` entries before sorting them.
