@@ -31,3 +31,8 @@
 **Vulnerability:** The application crashed with a raw stack trace when reading malformed UTF-8 bytes from stdin via `sys.stdin.read()`, causing a Denial of Service (DoS). The bytes were often converted to surrogate escapes which later caused `UnicodeEncodeError` when writing.
 **Learning:** `sys.stdin.read()` may not immediately fail on invalid UTF-8 depending on environment settings (e.g., using `surrogateescape`). These invalid strings can propagate and crash the application during later file writes. We must strictly force UTF-8 validation at the input boundary.
 **Prevention:** Force encoding of the read string via `data.encode("utf-8")` immediately after reading from `sys.stdin` and wrap it in a `try...except (OSError, UnicodeError):` block to fail securely.
+
+## 2024-12-11 - [Denial of Service via Uncaught UnicodeError in file operations]
+**Vulnerability:** The application was catching only `UnicodeDecodeError` when reading/writing files, potentially crashing from `UnicodeEncodeError` issues (e.g., surrogate escapes) during file operations.
+**Learning:** When explicitly catching encoding exceptions during file I/O operations (e.g., using `read_text()` or `open()`), catch the base `UnicodeError` instead of just `UnicodeDecodeError`. This ensures that unhandled `UnicodeEncodeError` issues do not lead to Denial of Service (DoS) application crashes.
+**Prevention:** Catch the broader `UnicodeError` class instead of the specific `UnicodeDecodeError`.

@@ -313,7 +313,7 @@ def parse_frontmatter(path: Path) -> dict:
             if not found_end:
                 return meta
             meta = temp_meta
-    except (OSError, UnicodeDecodeError):
+    except (OSError, UnicodeError):
         return meta
     # Normalize `to` -> list of recipients (empty == everyone).
     raw = meta.get("to", "").strip()
@@ -535,7 +535,7 @@ def _read_body(a) -> str:
             return Path(a.body_file).read_text(encoding="utf-8")
         except OSError as e:
             raise AgentChatError(f"could not read body file: {e}")
-        except UnicodeDecodeError as e:
+        except UnicodeError as e:
             raise AgentChatError(f"could not read body file: {e}")
     # Default: read from stdin so agents can pipe long markdown bodies.
     if sys.stdin.isatty():
@@ -595,7 +595,7 @@ def _print_message(path: Path):
     print("=" * 70)
     try:
         print(path.read_text(encoding="utf-8").rstrip())
-    except (OSError, UnicodeDecodeError) as e:
+    except (OSError, UnicodeError) as e:
         print(f"(could not read message {path.name}: {e})")
     print()
 
