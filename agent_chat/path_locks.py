@@ -680,13 +680,10 @@ class PathLockStore:
             )
         records: list[PathLockRecord] = []
         paths = []
-        try:
-            with os.scandir(self.locks_dir) as it:
-                for entry in it:
-                    if entry.name.endswith(".json") and not entry.name.startswith((".", "_")):
-                        paths.append(Path(entry.path))
-        except OSError:
-            pass
+        with os.scandir(self.locks_dir) as it:
+            for entry in it:
+                if entry.name.endswith(".json") and not entry.name.startswith((".", "_")):
+                    paths.append(Path(entry.path))
         for path in sorted(paths, key=lambda item: item.name):
             records.append(self._read_record(path))
         return records

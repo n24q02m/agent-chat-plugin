@@ -219,13 +219,10 @@ class TaskStore:
             )
         records = []
         paths = []
-        try:
-            with os.scandir(self.tasks_dir) as it:
-                for entry in it:
-                    if entry.name.endswith(".json") and not entry.name.startswith((".", "_")):
-                        paths.append(Path(entry.path))
-        except OSError:
-            pass
+        with os.scandir(self.tasks_dir) as it:
+            for entry in it:
+                if entry.name.endswith(".json") and not entry.name.startswith((".", "_")):
+                    paths.append(Path(entry.path))
         for path in sorted(paths, key=lambda item: item.name):
             self._assert_inside_channel(path)
             records.append(self._read_path(path))
