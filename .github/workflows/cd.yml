@@ -7,6 +7,10 @@ name: CD
 # App installed on this repo.
 
 on:
+  push:
+    branches:
+      - staging
+      - main
   workflow_dispatch:
     inputs:
       release_type:
@@ -14,6 +18,11 @@ on:
         required: true
         type: choice
         options: [beta, stable]
+
+env:
+  # Unified release ladder: push to staging = beta, push to main = stable.
+  # workflow_dispatch keeps release_type as an explicit override.
+  RELEASE_TYPE: ${{ github.event_name == 'push' && (github.ref_name == 'staging' && 'beta' || 'stable') || inputs.release_type }}
 
 permissions:
   contents: write
@@ -45,7 +54,7 @@ jobs:
         id: release
         with:
           github_token: ${{ steps.app-token.outputs.token }}
-          prerelease: ${{ inputs.release_type == 'beta' }}
+          prerelease: ${{ env.RELEASE_TYPE == 'beta' }}
           prerelease_token: beta
       - uses: python-semantic-release/publish-action@6d89e2de8d40ecb3717316ecbbf15a6fa8ea9039 # v10.6.2
         if: steps.release.outputs.released == 'true'
@@ -77,7 +86,7 @@ jobs:
     # directly (not is_prerelease) since this repo's release job outputs
     # only released/tag.
     needs: [release, publish-pypi]
-    if: needs.release.outputs.released == 'true' && inputs.release_type == 'stable'
+    if: needs.release.outputs.released == 'true' && env.RELEASE_TYPE == 'stable'
     runs-on: ubuntu-latest
     steps:
       - name: Generate GitHub App Token
