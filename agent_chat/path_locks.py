@@ -679,9 +679,15 @@ class PathLockStore:
                 f"lock storage is not a directory: {self.locks_dir}",
             )
         records: list[PathLockRecord] = []
-        for path in sorted(self.locks_dir.glob("*.json"), key=lambda item: item.name):
-            if path.name.startswith((".", "_")):
-                continue
+        found_paths = []
+        try:
+            with os.scandir(self.locks_dir) as it:
+                for entry in it:
+                    if entry.name.endswith(".json") and not entry.name.startswith((".", "_")):
+                        found_paths.append(Path(entry.path))
+        except OSError:
+            pass
+        for path in sorted(found_paths, key=lambda item: item.name):
             records.append(self._read_record(path))
         return records
 
@@ -1542,7 +1548,15 @@ class PathLockStore:
                 "PATH_LOCK_NOT_FOUND", f"lock record does not exist: {target}"
             )
         matches: list[tuple[Path, PathLockRecord]] = []
-        for path in self.locks_dir.glob("*.json") if self.locks_dir.exists() else []:
+        found_paths = []
+        try:
+            with os.scandir(self.locks_dir) as it:
+                for entry in it:
+                    if entry.name.endswith(".json"):
+                        found_paths.append(Path(entry.path))
+        except OSError:
+            pass
+        for path in found_paths:
             record = self._read_record(path)
             if any(item.normalized_path == requested.normalized_path for item in record.paths):
                 matches.append((path, record))
