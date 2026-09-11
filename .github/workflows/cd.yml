@@ -86,7 +86,7 @@ jobs:
     # directly (not is_prerelease) since this repo's release job outputs
     # only released/tag.
     needs: [release, publish-pypi]
-    if: needs.release.outputs.released == 'true' && env.RELEASE_TYPE == 'stable'
+    if: needs.release.outputs.released == 'true' && (github.event_name == 'workflow_dispatch' && inputs.release_type == 'stable' || github.event_name == 'push' && github.ref_name == 'main')
     runs-on: ubuntu-latest
     steps:
       - name: Generate GitHub App Token
