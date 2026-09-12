@@ -852,11 +852,12 @@ class LeaseStore:
         marker = f'"transaction_id": "{transaction_id}"'
         for path in chat.message_files(self.channel):
             try:
-                body = path.read_text(encoding="utf-8")
+                with path.open(encoding="utf-8") as f:
+                    for line in f:
+                        if marker in line:
+                            return True
             except (OSError, UnicodeError):
                 continue
-            if marker in body:
-                return True
         return False
 
 
