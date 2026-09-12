@@ -47,3 +47,6 @@
 ## 2024-11-20 - Avoid Path.iterdir() in core storage loops
 **Learning:** `Path.iterdir()` creates overhead by instantiating `Path` objects for every matched file. Using `os.scandir()` prevents unnecessary instantiation of Path objects and improves iteration performance, especially in directories with many files (yielding a ~4.5x speedup).
 **Action:** Replace `Path.iterdir()` with `os.scandir()` within a `with` block across core data paths to improve read performance.
+## 2024-11-20 - Streaming file contents for search
+**Learning:** Using `Path.read_text()` to check if a small string marker exists in a set of markdown files loads all file contents into memory, slowing down operations significantly when files are large.
+**Action:** When searching for a substring or marker in files (e.g., during `_audit_event_exists_for_transaction`), use streaming (`path.open()` and an iterator over lines) to stop reading as soon as the target is found, avoiding O(N) memory allocation per file.
