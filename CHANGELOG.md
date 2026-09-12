@@ -2,6 +2,27 @@
 
 <!-- version list -->
 
+## v0.7.1 (2026-09-12)
+
+### Bug Fixes
+
+- **deps**: Update astral-sh/setup-uv action to v10.1.0
+  ([#192](https://github.com/n24q02m/agent-chat-plugin/pull/192),
+  [`af685f4`](https://github.com/n24q02m/agent-chat-plugin/commit/af685f4d235f900aa2decda2237210e3fdc26774))
+
+- **deps**: Update ruff to v0.16.7 ([#193](https://github.com/n24q02m/agent-chat-plugin/pull/193),
+  [`19bc27b`](https://github.com/n24q02m/agent-chat-plugin/commit/19bc27bff1476c29d169222ff8b4276b877216bf))
+
+### Chores
+
+- Pin BSR action to v1.6.1 stable (6e688489)
+  ([#194](https://github.com/n24q02m/agent-chat-plugin/pull/194),
+  [`a035ea7`](https://github.com/n24q02m/agent-chat-plugin/commit/a035ea795e7014de57c160958f64ad42376c868f))
+
+- **rulesets**: Align IaC with repo-bootstrap template
+  ([`6de2ba3`](https://github.com/n24q02m/agent-chat-plugin/commit/6de2ba3c7f3dae0636c85a9bb6ae75a863f8011f))
+
+
 ## v0.7.0 (2026-09-11)
 
 ### Bug Fixes
