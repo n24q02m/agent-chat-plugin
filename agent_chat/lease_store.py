@@ -350,9 +350,15 @@ class LeaseStore:
                 f"claim storage is not a directory: {self.claims_dir}",
             )
         matches: list[tuple[Path, LeaseRecord]] = []
-        for path in sorted(self.claims_dir.glob("*.json"), key=lambda item: item.name):
-            if path.name.startswith((".", "_")):
-                continue
+        found_paths = []
+        try:
+            with os.scandir(self.claims_dir) as it:
+                for entry in it:
+                    if entry.name.endswith(".json") and not entry.name.startswith((".", "_")):
+                        found_paths.append(Path(entry.path))
+        except OSError:
+            pass
+        for path in sorted(found_paths, key=lambda item: item.name):
             self._assert_inside_channel(path)
             record = self._read_claim(path)
             if record.channel == self.channel.name and record.task_id == task_id:
@@ -390,9 +396,15 @@ class LeaseStore:
                     f"claim storage is not a directory: {self.claims_dir}",
                 )
             records = []
-            for path in sorted(self.claims_dir.glob("*.json"), key=lambda item: item.name):
-                if path.name.startswith((".", "_")):
-                    continue
+            found_paths = []
+            try:
+                with os.scandir(self.claims_dir) as it:
+                    for entry in it:
+                        if entry.name.endswith(".json") and not entry.name.startswith((".", "_")):
+                            found_paths.append(Path(entry.path))
+            except OSError:
+                pass
+            for path in sorted(found_paths, key=lambda item: item.name):
                 self._assert_inside_channel(path)
                 records.append(self._read_claim(path))
             return records

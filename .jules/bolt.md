@@ -41,3 +41,6 @@
 ## 2024-11-20 - Safe Native String Parsing for Integers
 **Learning:** For simple string parsing in tight polling loops, native string methods are faster than uncompiled regular expressions. However, when validating strings for integer conversion (`int()`), `str.isdigit()` can return `True` for Unicode superscript characters (like `²`), which causes `int()` to crash with a `ValueError`.
 **Action:** When validating strings for integer conversion in Python, always use `str.isdecimal()` instead of `str.isdigit()` to safely restrict matches to standard base-10 numerals and prevent application crashes.
+## 2024-11-20 - Refactoring Path.glob() to os.scandir() in core storage
+**Learning:** `Path.glob()` creates overhead by instantiating `Path` objects for every matched file. Using `os.scandir()` prevents unnecessary instantiation of Path objects and reduces memory footprint in store read operations for path locks, leases, and tasks.
+**Action:** Replace `Path.glob()` with `os.scandir()` within a `try...except OSError:` block across core data loading paths to improve read performance.
