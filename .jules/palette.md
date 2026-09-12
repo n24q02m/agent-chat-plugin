@@ -43,3 +43,6 @@
 ## 2024-05-27 - List formatting in Task CLI output
 **Learning:** Raw lists formatted without spaces (e.g., `task-1,task-2`) in CLI tables and task detail views are visually dense and harder to read.
 **Action:** Use ", " (comma + space) to format list items in CLI output to improve readability and visual spacing.
+## 2026-09-11 - Graceful OSError handling
+**Learning:** For Python CLI applications, it is a poor UX to leak raw internal stack traces to the user when unhandled permissions or system IO errors occur.
+**Action:** Wrap all `OSError` exceptions globally at the CLI entry point using a clean standard error output to improve generic human legibility and accessibility.
