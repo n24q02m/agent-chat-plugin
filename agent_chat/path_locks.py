@@ -1237,8 +1237,10 @@ class PathLockStore:
             return False
         for path in message_paths:
             try:
-                if marker in path.read_text(encoding="utf-8"):
-                    return True
+                with path.open(encoding="utf-8") as f:
+                    for line in f:
+                        if marker in line:
+                            return True
             except (OSError, UnicodeError):
                 continue
         return False
