@@ -2,6 +2,23 @@
 
 <!-- version list -->
 
+## v0.7.2 (2026-09-14)
+
+### Bug Fixes
+
+- **deps**: Update n24q02m/better-semantic-release action to v1.6.2
+  ([#199](https://github.com/n24q02m/agent-chat-plugin/pull/199),
+  [`0b68ca4`](https://github.com/n24q02m/agent-chat-plugin/commit/0b68ca49e4b70716a28e9cfe03d99ad6e9e94a33))
+
+### Chores
+
+- **release**: Fix stale two-branch comment (single-main lane)
+  ([`4622c41`](https://github.com/n24q02m/agent-chat-plugin/commit/4622c41b209f86e119c4eec97427cebfc17becc6))
+
+- **release**: Single-main release lane (staging branch retired)
+  ([`92b5304`](https://github.com/n24q02m/agent-chat-plugin/commit/92b5304687396375725f91e71ee18ac35a047198))
+
+
 ## v0.7.1 (2026-09-12)
 
 ### Bug Fixes
