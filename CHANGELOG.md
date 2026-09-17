@@ -2,6 +2,19 @@
 
 <!-- version list -->
 
+## v0.7.3 (2026-09-17)
+
+### Bug Fixes
+
+- **deps**: Update ruff to v0.16.8 ([#200](https://github.com/n24q02m/agent-chat-plugin/pull/200),
+  [`c0d2cf5`](https://github.com/n24q02m/agent-chat-plugin/commit/c0d2cf50479be14dce26d4f8340a829bbd4af8d3))
+
+### Continuous Integration
+
+- Consolidate workflows into ci.yml + cd.yml
+  ([`b246e49`](https://github.com/n24q02m/agent-chat-plugin/commit/b246e497a94006cb2440e48d19b21a05da61292a))
+
+
 ## v0.7.2 (2026-09-14)
 
 ### Bug Fixes
