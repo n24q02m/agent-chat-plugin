@@ -1019,7 +1019,12 @@ def cmd_task_list(root: Path, a):
     for task in tasks:
         owner = task.owner or "-"
         dependencies = ", ".join(task.depends_on) or "-"
-        rows.append((task.id, task.status, owner, dependencies, task.title))
+        if len(dependencies) > 40:
+            dependencies = dependencies[:37] + "..."
+        title = task.title
+        if len(title) > 60:
+            title = title[:57] + "..."
+        rows.append((task.id, task.status, owner, dependencies, title))
     w_id = max(len("ID"), max(len(r[0]) for r in rows))
     w_status = max(len("STATUS"), max(len(r[1]) for r in rows))
     w_owner = max(len("OWNER"), max(len(r[2]) for r in rows))
