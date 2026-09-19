@@ -1235,7 +1235,10 @@ class PathLockStore:
             message_paths = chat.message_files(self.channel)
         except (OSError, UnicodeError):
             return False
-        for path in message_paths:
+        # ⚡ Bolt: Audit events are typically recent additions. Searching backwards
+        # through messages (message_paths returns a sorted list) finds the transaction
+        # event much faster and reduces I/O overhead.
+        for path in reversed(message_paths):
             try:
                 with path.open(encoding="utf-8") as f:
                     for line in f:

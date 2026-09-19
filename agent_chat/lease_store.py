@@ -851,7 +851,10 @@ class LeaseStore:
         if not isinstance(transaction_id, str) or not transaction_id:
             return False
         marker = f'"transaction_id": "{transaction_id}"'
-        for path in chat.message_files(self.channel):
+        # ⚡ Bolt: Audit events are typically recent additions. Searching backwards
+        # through messages (chat.message_files returns a sorted list) finds the
+        # transaction event much faster and reduces I/O overhead.
+        for path in reversed(chat.message_files(self.channel)):
             try:
                 with path.open(encoding="utf-8") as f:
                     for line in f:
