@@ -2,6 +2,25 @@
 
 <!-- version list -->
 
+## v0.7.4 (2026-09-21)
+
+### Bug Fixes
+
+- **deps**: Update github/codeql-action action to v4.38.1
+  ([#206](https://github.com/n24q02m/agent-chat-plugin/pull/206),
+  [`6e22596`](https://github.com/n24q02m/agent-chat-plugin/commit/6e22596d6f985ccaf87666dc1d5f342de59852e4))
+
+- **deps**: Update n24q02m/better-semantic-release action to v1.7.0
+  ([#201](https://github.com/n24q02m/agent-chat-plugin/pull/201),
+  [`942a748`](https://github.com/n24q02m/agent-chat-plugin/commit/942a74851a7401cee7e176c7f7e7ab1524eae2fe))
+
+### Performance Improvements
+
+- Use reverse iteration for audit event search
+  ([#205](https://github.com/n24q02m/agent-chat-plugin/pull/205),
+  [`4814a51`](https://github.com/n24q02m/agent-chat-plugin/commit/4814a519cf8206de9493b256db1e58eaa400b3ab))
+
+
 ## v0.7.3 (2026-09-17)
 
 ### Bug Fixes
