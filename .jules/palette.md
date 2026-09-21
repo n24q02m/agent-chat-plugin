@@ -46,3 +46,7 @@
 ## 2026-09-11 - Graceful OSError handling
 **Learning:** For Python CLI applications, it is a poor UX to leak raw internal stack traces to the user when unhandled permissions or system IO errors occur.
 **Action:** Wrap all `OSError` exceptions globally at the CLI entry point using a clean standard error output to improve generic human legibility and accessibility.
+
+## 2024-10-24 - CLI Table Truncation
+**Learning:** In CLI applications that output data in tables, excessively long variable data fields (like titles or joined dependency lists) can misalign columns and hurt readability.
+**Action:** Prevent this by explicitly truncating them to a fixed width with an ellipsis (e.g., `text[:57] + "..."`) before rendering the table rows.
