@@ -50,3 +50,7 @@
 ## 2024-11-20 - Streaming file contents for search
 **Learning:** Using `Path.read_text()` to check if a small string marker exists in a set of markdown files loads all file contents into memory, slowing down operations significantly when files are large.
 **Action:** When searching for a substring or marker in files (e.g., during `_audit_event_exists_for_transaction`), use streaming (`path.open()` and an iterator over lines) to stop reading as soon as the target is found, avoiding O(N) memory allocation per file.
+
+## 2024-11-20 - Backward iteration for recent events in O(1) time
+**Learning:** When searching for recently appended events (like transaction audit messages) within a chronologically sorted list of files, iterating linearly from the beginning (oldest to newest) forces an O(N) traversal.
+**Action:** Always use `reversed()` when searching for recent occurrences in chronological file lists (e.g., `reversed(chat.message_files(self.channel))`). This short-circuits the search immediately when it finds the recent event, improving best-case complexity from O(N) to O(1) file reads without breaking architectural encapsulation.
