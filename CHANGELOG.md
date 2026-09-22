@@ -2,6 +2,19 @@
 
 <!-- version list -->
 
+## v0.7.5 (2026-09-22)
+
+### Bug Fixes
+
+- **deps**: Update astral-sh/setup-uv action to v10.2.0
+  ([#208](https://github.com/n24q02m/agent-chat-plugin/pull/208),
+  [`7aa55c1`](https://github.com/n24q02m/agent-chat-plugin/commit/7aa55c1426108170dff79322b40a8b0c9086c793))
+
+- **deps**: Update n24q02m/better-semantic-release action to v1.7.1
+  ([#207](https://github.com/n24q02m/agent-chat-plugin/pull/207),
+  [`ed64fa2`](https://github.com/n24q02m/agent-chat-plugin/commit/ed64fa2c3f5abc2ac5bf08750339f2e959e46018))
+
+
 ## v0.7.4 (2026-09-21)
 
 ### Bug Fixes
