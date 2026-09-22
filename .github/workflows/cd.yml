@@ -49,7 +49,7 @@ jobs:
         with:
           token: ${{ steps.app-token.outputs.token }}
           fetch-depth: 0
-      - uses: n24q02m/better-semantic-release@a994102ce3aa588fe3038e79707ae7ae3971b336 # v1.7.0
+      - uses: n24q02m/better-semantic-release@0422e303c2a4af650c8f13772b83a5ef2adc62fc # v1.7.1
         id: release
         with:
           github_token: ${{ steps.app-token.outputs.token }}
