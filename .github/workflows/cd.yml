@@ -55,7 +55,7 @@ jobs:
           github_token: ${{ steps.app-token.outputs.token }}
           prerelease: ${{ env.RELEASE_TYPE == 'beta' }}
           prerelease_token: beta
-      - uses: python-semantic-release/publish-action@6d89e2de8d40ecb3717316ecbbf15a6fa8ea9039 # v10.6.2
+      - uses: python-semantic-release/publish-action@99d4062dd393b5a7a62c5fe9ed78fb364b5674f2 # v10.7.0
         if: steps.release.outputs.released == 'true'
         with:
           github_token: ${{ steps.app-token.outputs.token }}
