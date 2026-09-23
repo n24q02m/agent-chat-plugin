@@ -394,7 +394,10 @@ def read_cursor(chan: Path, agent: str) -> int:
 def write_cursor(chan: Path, agent: str, seq: int):
     p = cursor_path(chan, agent)
     p.parent.mkdir(parents=True, exist_ok=True)
-    p.write_text(str(seq), encoding="utf-8")
+    try:
+        p.write_text(str(seq), encoding="utf-8")
+    except (OSError, UnicodeError) as e:
+        raise AgentChatError(f"could not write cursor: {e}")
 
 
 def max_seq(chan: Path) -> int:
@@ -422,18 +425,21 @@ def cmd_init(root: Path, a):
     if meta_path.exists():
         raise AgentChatError(f"channel '{a.channel}' already exists")
     members = [m.strip() for m in (a.members or "").split(",") if m.strip()]
-    meta_path.write_text(
-        json.dumps(
-            {
-                "channel": a.channel,
-                "members": members,
-                "topic": a.topic or "",
-                "created": now_iso(),
-            },
-            indent=2,
-        ),
-        encoding="utf-8",
-    )
+    try:
+        meta_path.write_text(
+            json.dumps(
+                {
+                    "channel": a.channel,
+                    "members": members,
+                    "topic": a.topic or "",
+                    "created": now_iso(),
+                },
+                indent=2,
+            ),
+            encoding="utf-8",
+        )
+    except (OSError, UnicodeError) as e:
+        raise AgentChatError(f"could not write _meta.json: {e}")
     m_str = ", ".join(members) if members else "(open)"
     print(f"created channel '{a.channel}' at {d}  members={m_str}")
 
@@ -585,7 +591,10 @@ def cmd_post(root: Path, a):
             "---",
             "",
         ]
-        (d / fname).write_text("\n".join(fm) + body.rstrip() + "\n", encoding="utf-8")
+        try:
+            (d / fname).write_text("\n".join(fm) + body.rstrip() + "\n", encoding="utf-8")
+        except (OSError, UnicodeError) as e:
+            raise AgentChatError(f"could not write message: {e}")
     finally:
         _release_lock(lock)
     print(f"posted #{seq} -> {a.channel}/{fname}")

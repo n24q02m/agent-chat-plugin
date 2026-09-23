@@ -36,3 +36,8 @@
 **Vulnerability:** The application was catching only `UnicodeDecodeError` when reading/writing files, potentially crashing from `UnicodeEncodeError` issues (e.g., surrogate escapes) during file operations.
 **Learning:** When explicitly catching encoding exceptions during file I/O operations (e.g., using `read_text()` or `open()`), catch the base `UnicodeError` instead of just `UnicodeDecodeError`. This ensures that unhandled `UnicodeEncodeError` issues do not lead to Denial of Service (DoS) application crashes.
 **Prevention:** Catch the broader `UnicodeError` class instead of the specific `UnicodeDecodeError`.
+
+## 2026-09-23 - [Denial of Service via Uncaught UnicodeError in write_text]
+**Vulnerability:** The application was not catching `UnicodeError` when writing files via `Path.write_text()`. This could lead to a Denial of Service (DoS) with raw stack traces leaking if surrogate escapes (from invalid read operations) were passed into write functions.
+**Learning:** `Path.write_text(encoding="utf-8")` raises `UnicodeEncodeError` when surrogate escapes are present in the string.
+**Prevention:** Wrap all `Path.write_text(encoding="utf-8")` calls in `try...except (OSError, UnicodeError):` blocks and raise application domain errors to fail securely.
