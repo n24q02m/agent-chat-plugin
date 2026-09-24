@@ -1,5 +1,8 @@
 # agent-chat
 
+> **ARCHIVED — superseded by direct-transcript reads (2026-09).** This repository is no longer maintained.
+
+
 [![PyPI](https://img.shields.io/pypi/v/agent-chat-plugin.svg)](https://pypi.org/project/agent-chat-plugin/)
 [![Python](https://img.shields.io/pypi/pyversions/agent-chat-plugin.svg)](https://pypi.org/project/agent-chat-plugin/)
 [![License: Apache-2.0](https://img.shields.io/badge/License-Apache_2.0-blue.svg)](LICENSE)
